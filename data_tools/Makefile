@@ -20,3 +20,6 @@ vbase_graph : vbase_graph.cpp
 
 phase_detection : phase_detection.cpp
 	$(CC) $(CFLAGS) -o phase_detection phase_detection.cpp $(LFLAGS)
+
+make_graph_run_queries : make_graph_run_queries.cpp
+	$(CC) $(CFLAGS) -o make_graph_run_queries make_graph_run_queries.cpp $(LFLAGS)
