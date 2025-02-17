@@ -94,8 +94,9 @@ struct clusterPID {
     if (active_indices.size() <= cluster_size)
       naive_neighbors(Points, active_indices, K);
     else {
-      auto [f, s] = select_two_random(active_indices, rnd);
-
+      auto f_s = select_two_random(active_indices, rnd);
+      auto f = f_s.first;
+      auto s = f_s.second;
       auto left_rnd = rnd.fork(0);
       auto right_rnd = rnd.fork(1);
 

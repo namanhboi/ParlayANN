@@ -283,7 +283,7 @@ int main(int argc, char* argv[]) {
         using PR = PointRange<Point>;
         PR Points_(Points);
         PR Query_Points_(Query_Points, Points_.params);
-        timeNeighbors<Point, PR, uint>(G, Query_Points_, k, BP, oFile, GT, rFile, graph_built, Points_);
+        timeNeighbors<Point, PR, uint>(G, Query_Points_, k, BP, oFile, GT, rFile, graph_built, Points_); // 
       } else {
         using Point = Mips_Point<float>;
         using PR = PointRange<Point>;

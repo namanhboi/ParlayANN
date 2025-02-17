@@ -69,6 +69,11 @@ void write_output_to_file(int argc, char* argv[], long random_query_index, parla
 }
 
 
+
+
+
+
+
 // saves the index and distance of a visited node on the path to a random query
 int main(int argc, char* argv[]) {
   commandLine P(argc, argv,

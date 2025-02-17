@@ -17,3 +17,6 @@ random_sample : random_sample.cpp
 
 vbase_graph : vbase_graph.cpp
 	$(CC) $(CFLAGS) -o vbase_graph vbase_graph.cpp $(LFLAGS)
+
+phase_detection : phase_detection.cpp
+	$(CC) $(CFLAGS) -o phase_detection phase_detection.cpp $(LFLAGS)
