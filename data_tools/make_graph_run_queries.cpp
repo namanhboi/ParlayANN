@@ -11,6 +11,7 @@
 #include <set>
 
 #include "../algorithms/bench/parse_command_line.h"
+#include "../algorithms/vamana/neighbors.h"
 #include "parlay/parallel.h"
 #include "parlay/primitives.h"
 #include "utils/beamSearch.h"
@@ -19,8 +20,6 @@
 #include "utils/graph.h"
 #include "utils/point_range.h"
 #include "utils/types.h"
-
-#include "../algorithms/vamana/neighbors.h"
 
 using namespace parlayANN;
 
@@ -50,8 +49,8 @@ std::vector<int> random_numbers(const int start, const int end, const int num) {
   return v;
 }
 
-template <typename PointRange>
-void record_hops_info(long array_index, long query_index,
+template <typename Point, typename PointRange>
+void record_hops_info(long array_index, Point query_point,
                       const Graph<unsigned int> &G, const PointRange &Points,
                       const QueryParams &QP, parlay::sequence<int> &num_hops,
                       parlay::sequence<int> &num_hops_phase_1,
@@ -60,15 +59,13 @@ void record_hops_info(long array_index, long query_index,
                       parlay::sequence<double> &time_phase_2,
                       parlay::sequence<double> &time_total, int top_n) {
 
-  parlay::sequence<float> distances_from_query_to_all =
-      parlay::tabulate(Points.size(), [&](long i) {
-        return Points[query_index].distance(Points[i]);
-      });
+  parlay::sequence<float> distances_from_query_to_all = parlay::tabulate(
+      Points.size(), [&](long i) { return query_point.distance(Points[i]); });
   parlay::sequence<size_t> distances_from_query_to_all_rank =
       parlay::rank(distances_from_query_to_all);
 
   const parlay::sequence<unsigned int> starting_points = {0};
-  auto r = parlayANN::beam_search_timestamp(Points[query_index], G, Points,
+  auto r = parlayANN::beam_search_timestamp(query_point, G, Points,
                                             starting_points, QP);
   auto visited_and_timestamp = r.first.second;
   auto visited = visited_and_timestamp.first;
@@ -108,10 +105,9 @@ void record_hops_info(long array_index, long query_index,
 template <typename PointRange>
 PhasesStats calculate_hops_phases(const Graph<unsigned int> &G,
                                   const PointRange &Points,
-                                  const int num_query_points,
+                                  const PointRange &QueryPoints,
                                   const QueryParams &QP, const int top_n) {
-  std::vector<int> random_indices =
-      random_numbers(0, Points.size() - 1, num_query_points);
+  const size_t num_query_points = QueryPoints.size();
   parlay::sequence<int> num_hops_phase_1(num_query_points, 0);
   parlay::sequence<int> num_hops_phase_2(num_query_points, 0);
   parlay::sequence<int> num_hops(num_query_points, 0);
@@ -121,20 +117,20 @@ PhasesStats calculate_hops_phases(const Graph<unsigned int> &G,
   parlay::sequence<double> time_total(num_query_points, 0.0);
 
   parlay::parallel_for(0, num_query_points, [&](long i) {
-    return record_hops_info(i, random_indices[i], G, Points, QP, num_hops,
+    return record_hops_info(i, QueryPoints[i], G, Points, QP, num_hops,
                             num_hops_phase_1, num_hops_phase_2, time_phase_1,
                             time_phase_2, time_total, top_n);
   });
 
   PhasesStats stat = {
-    .hops_phase_1_mean =
-        (double)parlay::reduce(num_hops_phase_1) / num_query_points,
-    .hops_phase_2_mean =
-        (double)parlay::reduce(num_hops_phase_2) / num_query_points,
-    .hops_total_mean = (double)parlay::reduce(num_hops) / num_query_points,
-    .time_phase_1_mean = parlay::reduce(time_phase_1) / num_query_points,
-    .time_phase_2_mean = parlay::reduce(time_phase_2) / num_query_points,
-    .time_total_mean = parlay::reduce(time_total) / num_query_points,
+      .hops_phase_1_mean =
+          (double)parlay::reduce(num_hops_phase_1) / num_query_points,
+      .hops_phase_2_mean =
+          (double)parlay::reduce(num_hops_phase_2) / num_query_points,
+      .hops_total_mean = (double)parlay::reduce(num_hops) / num_query_points,
+      .time_phase_1_mean = parlay::reduce(time_phase_1) / num_query_points,
+      .time_phase_2_mean = parlay::reduce(time_phase_2) / num_query_points,
+      .time_total_mean = parlay::reduce(time_total) / num_query_points,
   };
   return stat;
 }
@@ -151,8 +147,11 @@ int main(int argc, char *argv[]) {
                 "[-distance_origin <do>]<inFile>");
 
   char *iFile = P.getOptionValue("-base_path");
+  char *rFile =
+      P.getOptionValue("-res_path"); // path for result of making ANN index
+  char *qFile = P.getOptionValue("-query_path");
+  char *gtFile = P.getOptionValue("-gt_path");
   char *vectype = P.getOptionValue("-data_type");
-  long num_query_points = P.getOptionIntValue("-num_query", 1000);
 
   long Q = P.getOptionIntValue("-Q", 0);
   long R = P.getOptionIntValue("-R", 0);
@@ -229,11 +228,12 @@ int main(int argc, char *argv[]) {
     std::cout << "Error: specify distance type Euclidian or mips" << std::endl;
     abort();
   }
-  groundTruth<unsigned int> GT(NULL);
+  groundTruth<unsigned int> GT(gtFile);
+  std::cout << GT.size() << std::endl;
   if (tp == "float") {
     if (df == "Euclidian") {
       PointRange<Euclidian_Point<float>> Points(iFile);
-      PointRange<Euclidian_Point<float>> QueryPoints(NULL);
+      PointRange<Euclidian_Point<float>> QueryPoints(qFile);
       if (normalize) {
         for (int i = 0; i < Points.size(); i++)
           Points[i].normalize();
@@ -255,7 +255,7 @@ int main(int argc, char *argv[]) {
       } else {
         using Point = Euclidian_Point<float>;
         using PR = PointRange<Point>;
-        ANN<Point, PR, unsigned int>(G, k, BP, QueryPoints, GT, NULL, false,
+        ANN<Point, PR, unsigned int>(G, k, BP, QueryPoints, GT, rFile, false,
                                      Points);
         QueryParams QP;
         QP.limit = limit != -1 ? limit : (long)G.size();
@@ -266,9 +266,16 @@ int main(int argc, char *argv[]) {
         QP.cut = cut;
         QP.beamSize = beam_size;
         PhasesStats stat =
-            calculate_hops_phases<PR>(G, Points, num_query_points, QP, top_n);
-        std::cout << stat.hops_total_mean << "," << stat.hops_phase_1_mean << ","
-        << stat.hops_phase_2_mean << "," << stat.time_total_mean << "," << stat.time_phase_1_mean <<"," << stat.time_phase_2_mean << std::endl;
+            calculate_hops_phases<PR>(G, Points, QueryPoints, QP, top_n);
+        std::cout << stat.hops_total_mean << "," << stat.hops_phase_1_mean
+                  << "," << stat.hops_phase_2_mean << ","
+                  << stat.time_total_mean << "," << stat.time_phase_1_mean
+        << "," << stat.time_phase_2_mean << ",";
+
+        nn_result recall_res = checkRecall<PR, PR, PR, unsigned int>(
+            G, Points, QueryPoints, Points, QueryPoints, Points, QueryPoints,
+								     GT, false, 0, 10, QP, false);
+	std::cout << recall_res.recall << std::endl;
       }
     }
   } else {
