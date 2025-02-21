@@ -255,7 +255,7 @@ int main(int argc, char *argv[]) {
       } else {
         using Point = Euclidian_Point<float>;
         using PR = PointRange<Point>;
-        ANN<Point, PR, unsigned int>(G, k, BP, QueryPoints, GT, rFile, false,
+        ANN<Point, PR, unsigned int>(G, k, BP, QueryPoints, GT, NULL, false,
                                      Points);
         QueryParams QP;
         QP.limit = limit != -1 ? limit : (long)G.size();
