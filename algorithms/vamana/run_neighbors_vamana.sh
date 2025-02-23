@@ -1,0 +1,1 @@
+./neighbors -R 32 -L 64 -a 1.2 -graph_path ../../data/sift/sift_learn_32_64 -query_path ../../data/sift/sift_query.fbin -gt_path ../../data/sift/sift-100K -data_type float -dist_func Euclidian -base_path ../../data/sift/sift_learn.fbin

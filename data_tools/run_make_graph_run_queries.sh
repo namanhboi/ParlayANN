@@ -1,0 +1,1 @@
+./make_graph_run_queries -R 32 -L 64 -alpha 1.2 -two_pass 0 -data_type float -dist_func Euclidian -base_path ../data/sift/sift_learn.fbin -query_path ../data/sift/sift_query.fbin -gt_path ../data/sift/sift-100K 
