@@ -4,3 +4,4 @@ cmake-build-debug/
 data_tools/compute_groundtruth
 data_tools/vec_to_bin
 *build*/
+data/*
