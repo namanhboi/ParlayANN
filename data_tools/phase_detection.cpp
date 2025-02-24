@@ -36,6 +36,7 @@ void record_information_query(
 			      const parlayANN::QueryParams &QP,
 			      const parlay::sequence<unsigned int> starting_points,
 			      int top_n, // defines the barrier that separates the 2 phases, nodes that are with the top 100 closest distance to the query node are in phase 2
+			      parlay::sequence<double> &total_time,
 			      parlay::sequence<double> &time_phase_1, // time spent in phase 1
 			      parlay::sequence<double> &time_phase_2, // time spent in phase 2
 			      parlay::sequence<int> &num_hops_phase_1, // number of hops in phase 1
@@ -73,6 +74,7 @@ void record_information_query(
       break;
     }
   }
+  total_time[query_index] = visited_timestamp[visited.size() - 1] - visited_timestamp[0];
   time_phase_1[query_index] = phase_1;
   time_phase_2[query_index] = phase_2;
   num_hops_phase_1[query_index] = phase_1_hops;
@@ -92,6 +94,7 @@ void record_information_query(
 
 
 void write_to_csv(std::string csv_filename,
+                  parlay::sequence<double> &total_time,
 		  parlay::sequence<double> &time_phase_1, // time spent in phase 1
 		  parlay::sequence<double> &time_phase_2, // time spent in phase 2
 		  parlay::sequence<int> &num_hops_phase_1, // number of hops in phase 1
@@ -103,6 +106,7 @@ void write_to_csv(std::string csv_filename,
   parlayANN::csvfile csv(csv_filename);
 
   csv << "point_index"
+  << "query_time_total"
   << "query_time_phase_1"
   << "query_time_phase_2"
   << "query_num_hops_phase_1"
@@ -112,7 +116,7 @@ void write_to_csv(std::string csv_filename,
   << "phase_2_freq" << parlayANN::endrow;
   
   for (long i = 0; i < time_phase_1.size(); i++) {
-    csv << i << time_phase_1[i] << time_phase_2[i] << num_hops_phase_1[i] << num_hops_phase_2[i]
+    csv << i << total_time[i] << time_phase_1[i] << time_phase_2[i] << num_hops_phase_1[i] << num_hops_phase_2[i]
     << node_freq[i] << phase_1_freq[i] << phase_2_freq[i] << parlayANN::endrow;
   }
   csv << parlayANN::endrow;
@@ -153,7 +157,9 @@ int main(int argc, char* argv[]) {
 
       if (quantize == 8 || quantize == 16) abort_with_message( "Will impl support for quantize later");
 
-      size_t num_query_points = P.getOptionIntValue("-num_query_points", Points.size());
+      size_t num_query_points =
+        P.getOptionIntValue("-num_query_points", Points.size());
+      std::cout<<(num_query_points) << std::endl;
       using Point = parlayANN::Euclidian_Point<float>;
       using PR = parlayANN::PointRange<Point>;
       
@@ -172,7 +178,7 @@ int main(int argc, char* argv[]) {
       unsigned int start_index = 0;
       parlay::sequence<unsigned int> starting_points = {start_index};
 
-
+      parlay::sequence<double> time_total(Points.size(), 0.0);
       parlay::sequence<double> time_phase_1(Points.size(), 0.0); // time spent in phase 1
       parlay::sequence<double> time_phase_2(Points.size(), 0.0); // time spent in phase 2
       parlay::sequence<int> num_hops_phase_1(Points.size(), 0); // number of hops in phase 1
@@ -180,15 +186,12 @@ int main(int argc, char* argv[]) {
       parlay::sequence<int> node_freq(Points.size(), 0); // frequency of each node to show up in search
       parlay::sequence<int> phase_1_freq(Points.size(), 0); // frequency of each node to show up in phase 1
       parlay::sequence<int> phase_2_freq(Points.size(), 0); // frequency of each node to show up in phase 2
-
-      std::cout << "hello" << std::endl;
-      
       if (num_query_points == Points.size()) {
 	parlay::parallel_for(0, num_query_points, [&] (long i){
-	  return record_information_query(i, Points, G, QP, starting_points, top_n, time_phase_1, time_phase_2, num_hops_phase_1, num_hops_phase_2, node_freq, phase_1_freq, phase_2_freq);
+	  return record_information_query(i, Points, G, QP, starting_points, top_n, time_total ,time_phase_1, time_phase_2, num_hops_phase_1, num_hops_phase_2, node_freq, phase_1_freq, phase_2_freq);
 	});
 	
-	write_to_csv(csv_filename, time_phase_1, time_phase_2, num_hops_phase_1, num_hops_phase_2, node_freq, phase_1_freq, phase_2_freq);
+	write_to_csv(csv_filename, time_total, time_phase_1, time_phase_2, num_hops_phase_1, num_hops_phase_2, node_freq, phase_1_freq, phase_2_freq);
 	
 	std::cout << "finished" << std::endl;
 	

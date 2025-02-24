@@ -1,3 +1,4 @@
+from pathlib import Path
 import argparse
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -54,7 +55,7 @@ def graph_results(df: pd.DataFrame, filename):
     try:
         os.remove(filename)
     except OSError:
-        pass
+         pass
     fig.savefig(filename, dpi=300)
 
 
@@ -122,19 +123,24 @@ def overlayed_phases_hops_graph(df_list: list[pd.DataFrame], filename: str):
 
 
 def overlayed_phases_time_graph(df_list: list[pd.DataFrame], filename: str):
-    fig, axes = plt.subplots(ncols = 1, nrows = 2, figsize = (7, 10))
-    _, fake_axes = plt.subplots(ncols = 1, nrows = 2, figsize = (7, 10))
+    fig, axes = plt.subplots(ncols = 1, nrows = 3, figsize = (7, 12))
+    _, fake_axes = plt.subplots(ncols = 1, nrows = 3, figsize = (7, 12))
     bins_1, bin_edges_1 = pd.cut(
         df_list[0]["query_time_phase_1"], bins=1000, retbins=True
     )
     bins_2, bin_edges_2 = pd.cut(
         df_list[0]["query_time_phase_2"], bins=1000, retbins=True
     )
+    bins_total, bin_edges_total = pd.cut(
+        df_list[0]["query_time_total"], bins=1000, retbins=True
+    )
     colors = ["r", "g", "b"]
     y_space_phase_1 = 2000
     og_y_space_phase_1 =7000
     y_space_phase_2 = 2000
     og_y_space_phase_2 = 8000
+    y_space_phase_total = 2000
+    og_y_space_phase_total = 9000
     for i in range(len(df_list)):
         n_1, x_1, _ = fake_axes[0].hist(
             df_list[i]["query_time_phase_1"],
@@ -158,8 +164,19 @@ def overlayed_phases_time_graph(df_list: list[pd.DataFrame], filename: str):
         axes[1].plot(bin_centers_2, n_2, label=df_list[i].name, color=colors[i])
         axes[1].text(0.0001, og_y_space_phase_2 - y_space_phase_2 * i, df_list[i].name + '\n'  + df_list[i]["query_time_phase_2"].describe().loc[['mean', 'std']].to_string(), color = colors[i])
 
-    axes[0].set_xlim([-0.00001, 0.00015])
-    axes[1].set_xlim([-0.00001, 0.00015])
+        n_total, x_total, _ = fake_axes[2].hist(
+            df_list[i]["query_time_total"],
+            bins=bin_edges_total,
+            alpha=0.5,
+            label=df_list[i].name,
+            color=colors[i],
+        )
+        bin_centers_total = 0.5 * (x_total[1:] + x_total[:-1])
+        axes[1].plot(bin_centers_total, n_total, label=df_list[i].name, color=colors[i])
+        axes[1].text(0.0001, og_y_space_phase_total - y_space_phase_total * i, df_list[i].name + '\n'  + df_list[i]["query_time_total"].describe().loc[['mean', 'std']].to_string(), color = colors[i])
+
+    axes[0].set_xlim([-0.00001, 0.0003])
+    axes[1].set_xlim([0.00001, 0.0003])
     axes[0].legend()
     axes[1].legend()
     axes[0].set_xlabel("search time spent in phase 1")
@@ -172,26 +189,38 @@ def overlayed_phases_time_graph(df_list: list[pd.DataFrame], filename: str):
 
 
 if __name__ == "__main__":
-    # parser = argparse.ArgumentParser()
-    # parser.add_argument("-ip", "--input-path", help="path to csv file")
-    # parser.add_argument("-op", "--output-path", help="path to the png file")
-    # args = parser.parse_args()
-    # df: pd.DataFrame = pd.read_csv(args.input_path)
-    # pprint.pprint(df.columns.tolist())
-    # graph_results(df, args.output_path)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-ip", "--input-path", help="path to csv file", nargs="+", required=True)
+    parser.add_argument("-op", "--output-path", help="path to the png file", required = True)
+    parser.add_argument("-t", "--type", help = "type of graph you want to make", choices = ["all", "hops", "time"], required=True)
+    args = parser.parse_args()
+    if args.type == "all":
+        df = pd.read_csv(args.input_path)
+        graph_results(df, args.output_path)
+    elif args.type == "hops":
+        df_list = [pd.read_csv(csv_file) for csv_file in args.input_path]
+        for i in range(len(args.input_path)):
+            df_list[i].name = Path(args.input_path[i]).stem
+        overlayed_phases_hops_graph(df_list, args.output_path)
+    elif args.type == "time":
+        df_list = [pd.read_csv(csv_file) for csv_file in args.input_path]
+        for i in range(len(args.input_path)):
+            df_list[i].name = Path(args.input_path[i]).stem
+        overlayed_phases_time_graph(df_list, args.output_path)
+        
 
+    # # csv_files = [
+    # #     "/home/nam/vector_index_rs/ParlayANN/data_tools/phase_detection_result_hcnng_3_10.csv",
+    # #     "/home/nam/vector_index_rs/ParlayANN/data_tools/phase_detection_result_pynndescent_30.csv",
+    # #     "/home/nam/vector_index_rs/ParlayANN/data_tools/phase_detection_result_vamana_32_64.csv",
+    # # ]
     # csv_files = [
-    #     "/home/nam/vector_index_rs/ParlayANN/data_tools/phase_detection_result_hcnng_3_10.csv",
-    #     "/home/nam/vector_index_rs/ParlayANN/data_tools/phase_detection_result_pynndescent_30.csv",
-    #     "/home/nam/vector_index_rs/ParlayANN/data_tools/phase_detection_result_vamana_32_64.csv",
-    # ]
-    csv_files = [
-        "/home/nam/vector_index_rs/ParlayANN/data_tools/phase_detection_result_vamana_92_25.csv",
-        "/home/nam/vector_index_rs/ParlayANN/data_tools/phase_detection_result_vamana_100_133.csv",
-        ]
-    df_list = [pd.read_csv(csv_file) for csv_file in csv_files]
-    df_list[0].name = "vamana_92_25"
-    df_list[1].name = "vamana_100_133"
-    graph_filename = "overlayed_vamana_tuned_hops.png"
-    # overlayed_phases_time_graph(df_list, graph_filename)
-    overlayed_phases_hops_graph(df_list, graph_filename)
+    #     "/home/nam/vector_index_rs/ParlayANN/data_tools/phase_detection_result_vamana_92_25.csv",
+    #     "/home/nam/vector_index_rs/ParlayANN/data_tools/phase_detection_result_vamana_100_133.csv",
+    #     ]
+    # df_list = [pd.read_csv(csv_file) for csv_file in csv_files]
+    # df_list[0].name = "vamana_92_25"
+    # df_list[1].name = "vamana_100_133"
+    # graph_filename = "overlayed_vamana_tuned_hops.png"
+    # # overlayed_phases_time_graph(df_list, graph_filename)
+    # overlayed_phases_hops_graph(df_list, graph_filename)

@@ -23,3 +23,6 @@ phase_detection : phase_detection.cpp
 
 make_graph_run_queries : make_graph_run_queries.cpp
 	$(CC) $(CFLAGS) -o make_graph_run_queries make_graph_run_queries.cpp $(LFLAGS)
+
+merge_graphs: merge_graphs.cpp 
+	$(CC) $(CFLAGS) -o merge_graphs merge_graphs.cpp $(LFLAGS)
