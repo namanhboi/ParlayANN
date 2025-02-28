@@ -1,0 +1,62 @@
+* What's been done
+
+** Created the vbase graph
+** Fit sigmoid curve to query traversal path
+** Use Optuna to optimize for phase traversal time.
+
+* Ideas
+
+** Definition of phases during a traversal
+
+Right now, based on our findings, we have come up with 2 different
+definitions of phases.
+- Definition 1: Divide the 2 phases of traversal by an arbitrary
+  top_n distance from the query node. For the 1M sift dataset, a top
+  100 seems to work well.
+- Definition 2: Take the local maximum of the 2nd derivative of the
+  sigmoid curve fitted to the distance rank of a node vs the number of
+  hops of that node in the traversal path from the origin to the query
+  node.
+  [[/home/nam/vector_index_rs/ParlayANN/misc_python_functions/vbase_graph.png]]
+  
+  
+   
+** Definition of phases in a graph
+Based on the definition to the phases of traversal above, we can
+define divider between phases of a graph as the mean number of hops in
+phase 1.
+
+After running optuna to optimize for the phases, we would expect that
+the number of hops in the optimized graphs for each phases would be
+lower than the number of hops or the optimized graph for the entire
+traversal.
+
+** Merging the optimized phase 1 and phase 2 graphs
+Graft all neighborhoods of nodes belonging to phase 1 in the graph optimized for
+phase 1 onto the graph optimized for phase 2.
+
+To make a fair comparison of the performance of this graph, we
+generate a baseline graph with R = maxDeg of this graph.
+
+We expect our combined graph to perform better than the baseline graph
+in average total traversal time and the avg traversal time of each
+phase.
+
+* Questions for Ben
+- Is it safe to run parallel_for on a Graph?
+
+* ParlayANN Implementation notes
+** Graph
+The index of the points in the graph
+([[/home/nam/vector_index_rs/ParlayANN/algorithms/utils/graph.h]]) are the
+same as the index of the points in the Points from the base_path.
+** qSearchAll
+[[/home/nam/vector_index_rs/ParlayANN/algorithms/utils/beamSearch.h]]
+returns the neighbors of each node in a graph sorted by distance to
+that node I think.
+
+Q: But what's the difference between this and just sorting the neighbors
+of a node?
+
+
+
