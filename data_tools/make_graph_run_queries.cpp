@@ -3,12 +3,14 @@
   it to get the summary statistics about number of hops in phases 1, 2, and in
   the whole graph.
 
+  This is used for optuna training
 */
 #include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <random>
 #include <set>
+#include <cmath>
 
 #include "../algorithms/bench/parse_command_line.h"
 #include "../algorithms/vamana/neighbors.h"
@@ -20,9 +22,21 @@
 #include "utils/graph.h"
 #include "utils/point_range.h"
 #include "utils/types.h"
+#include "utils/csvfile.h"
+
 
 using namespace parlayANN;
 
+
+
+/*
+  The division between phase 1 and 2 is determined by a the breakpoint
+  in segmented least squared with 2 segments
+  
+  time_nn_beamsearch_convergence is the time spent for beamsearch to converge when
+  starting at the nearest neighbor of a query node. 
+
+*/
 struct PhasesStats {
   double hops_phase_1_mean;
   double hops_phase_2_mean;
@@ -30,40 +44,245 @@ struct PhasesStats {
   double time_phase_1_mean;
   double time_phase_2_mean;
   double time_total_mean;
+  double time_nn_beamsearch_convergence_mean;
+  parlay::sequence<int> num_hops_phase_1;
+  parlay::sequence<int> num_hops_phase_2 ;
+  parlay::sequence<int> num_hops;
+  parlay::sequence<double> time_phase_1;
+  parlay::sequence<double> time_phase_2;
+  parlay::sequence<double> time_total;
+  parlay::sequence<double> nn_beamsearch_time;
 };
+
+
+enum class OptMetric {
+  AVG_TOTAL_TIME,
+  AVG_PHASE_1_TIME,
+  AVG_PHASE_2_TIME,
+  ALL,
+  RECALL,
+  NN_BEAMSEARCH_CONVERGENCE
+};
+
+
+void print_opt_metric(OptMetric opt_metric){
+  switch(opt_metric) {
+  case OptMetric::AVG_TOTAL_TIME:
+    std::cout<<"avg total time"<<std::endl;
+    break;
+  case OptMetric::AVG_PHASE_1_TIME:
+    std::cout<<"avg phase 1 time"<<std::endl;
+    break;
+  case OptMetric::AVG_PHASE_2_TIME:
+    std::cout<<"avg phase 2 time"<<std::endl;
+    break;
+  case OptMetric::ALL:
+    std::cout<<"all"<<std::endl;
+    break;
+  case OptMetric::NN_BEAMSEARCH_CONVERGENCE:
+    std::cout << "nn beamsearch convergence" << std::endl;
+    break;
+  }
+}
 
 void abort_with_message(std::string message) {
   std::cout << message << std::endl;
   std::abort();
 }
 
-std::vector<int> random_numbers(const int start, const int end, const int num) {
-  std::random_device rd;
-  std::mt19937 gen(1); // seed
-  std::uniform_int_distribution<> distr(start, end);
-  std::set<int> rnd_num;
-  while (rnd_num.size() < num) {
-    rnd_num.insert(distr(gen));
+
+/**
+ * Perform segmented least squares regression and return only the breakpoints.
+ * 
+ * @param x Vector of x coordinates (must be sorted in ascending order)
+ * @param y Vector of y coordinates
+ * @param num_segments Number of line segments to fit
+ * @return Vector of breakpoint x-coordinates between segments
+ */
+int segmented_least_squares(
+			    const parlay::sequence<size_t>& x, 
+			    const parlay::sequence<double>& y, 
+			    int num_segments = 2) 
+{
+  // Validate inputs
+  if (x.size() != y.size()) abort_with_message("x and y must have equal size");
+  if (x.size() == 0) abort_with_message("x and y must not be empty");
+    
+  const int n = x.size();
+    
+  
+  if (num_segments <= 1 || n < 3) {
+    return 0;
   }
-  std::vector<int> v(rnd_num.begin(), rnd_num.end());
-  return v;
+  if (!parlay::is_sorted(x)) abort_with_message("x is not sorted");
+    
+    
+    // Function to calculate the error when fitting a line to points from indices i to j (inclusive)
+    auto segment_cost = [&](int i, int j) -> double {
+        if (j - i < 1) return std::numeric_limits<double>::infinity();
+        
+        // Calculate means
+        double sum_x = 0.0, sum_y = 0.0;
+        for (int k = i; k <= j; ++k) {
+            sum_x += x[k];
+            sum_y += y[k];
+        }
+        double mean_x = sum_x / (j - i + 1);
+        double mean_y = sum_y / (j - i + 1);
+        
+        // Calculate slope and intercept
+        double numerator = 0.0, denominator = 0.0;
+        for (int k = i; k <= j; ++k) {
+            numerator += (x[k] - mean_x) * (y[k] - mean_y);
+            denominator += (x[k] - mean_x) * (x[k] - mean_x);
+        }
+        
+        double slope = (denominator != 0) ? numerator / denominator : 0;
+        double intercept = mean_y - slope * mean_x;
+        
+        // Calculate error
+        double error = 0.0;
+        for (int k = i; k <= j; ++k) {
+            double predicted = slope * x[k] + intercept;
+            double diff = y[k] - predicted;
+            error += diff * diff;
+        }
+        
+        return error;
+    };
+    
+    // Initialize dynamic programming tables
+    // dp[i][j] = min cost to fit j segments on points 0...i
+    std::vector<std::vector<double>> dp(n, std::vector<double>(num_segments + 1, std::numeric_limits<double>::infinity()));
+    // parent[i][j] = last breakpoint when fitting j segments on points 0...i
+    std::vector<std::vector<int>> parent(n, std::vector<int>(num_segments + 1, -1));
+    
+    // Base case: one segment
+    for (int i = 0; i < n; ++i) {
+        dp[i][1] = segment_cost(0, i);
+    }
+    
+    // Fill the DP table
+    for (int j = 2; j <= num_segments; ++j) {  // For each number of segments
+        for (int i = j-1; i < n; ++i) {  // Need at least j points for j segments
+            for (int k = j-2; k < i; ++k) {  // Try each possible previous breakpoint
+                double cost = dp[k][j-1] + segment_cost(k+1, i);
+                if (cost < dp[i][j]) {
+                    dp[i][j] = cost;
+                    parent[i][j] = k;
+                }
+            }
+        }
+    }
+    
+    // Reconstruct the solution (find breakpoints)
+    std::vector<int> breakpoint_indices;
+    int i = n - 1;
+    int j = num_segments;
+    
+    while (j > 1) {
+        int k = parent[i][j];
+        breakpoint_indices.push_back(k + 1);  // +1 because this is the start of the next segment
+        i = k;
+        j--;
+    }
+    
+    // Reverse since we built the list backwards
+    std::reverse(breakpoint_indices.begin(), breakpoint_indices.end());
+    
+    // Convert indices to x values
+    std::vector<double> breakpoints;
+    for (int idx : breakpoint_indices) {
+        breakpoints.push_back(x[idx]);
+    }
+    
+    return breakpoints[0];
 }
 
+
+
+
+
+template<typename Point>
+unsigned int get_nearest_neighbor(const Point &query_point,
+				  const groundTruth<unsigned int> &GT) {
+  return GT.coordinates(query_point.id(), 0);
+}
+
+
+
+/*
+  a metric to measure time for phase 2 is defined as the time for beamsearch to converge starting from the nearest neighbor.
+ */
+template<typename Point, typename PointRange>
+double nn_beamsearch_convergence_time(const Point &query_point,
+		    const PointRange &Points,
+		    const Graph<unsigned int> &G,
+		    const groundTruth<unsigned int> &GT,
+		    const QueryParams &QP) {
+  const parlay::sequence<unsigned int> starting_points = {get_nearest_neighbor(query_point, GT)};
+  auto r = parlayANN::beam_search_timestamp(query_point, G, Points,
+                                            starting_points, QP);
+  auto visited_and_timestamp = r.first.second;
+  auto visited_timestamp = visited_and_timestamp.second;
+  return visited_timestamp[visited_timestamp.size() - 1] - visited_timestamp[0];
+}
+
+/*
+  query_point might not necessarily be in Points.
+  returns list of knn and  distance
+*/
+template<typename Point, typename PointRange>
+// parlay::sequence<std::pair<unsigned int, double>>
+void print_top_k_distance_neighbors(
+				    const Point &query_point,
+			       const PointRange &Points,
+			       const groundTruth<unsigned int> &GT,
+			       const int k) {
+  for (int i = 0; i < k; i++) {
+    unsigned int actual_index_topk_point = GT.coordinates(query_point.id(), i);
+    double distance = query_point.distance(Points[actual_index_topk_point]);
+    std::cout << "Top " << i <<  " point index is " << actual_index_topk_point << "," << "Distance from point to top " << i << " point is " << distance << std::endl;
+  }
+  
+}
+
+template<typename Point, typename PointRange>
+void print_actual_topk_distance(const Point &query_point,
+				const PointRange &Points,
+				int k) {
+  auto less = [&] (std::pair<double, unsigned int> a,
+		   std::pair<double, unsigned int> b) -> bool {
+    return a.first < b.first;
+  };
+  auto distances = parlay::tabulate(Points.size(), [&] (size_t i) -> std::pair<double, unsigned int> {
+    return std::make_pair(query_point.distance(Points[i]), i);
+  });
+  parlay::sort_inplace(distances, less);
+  for (int i = 0; i < k; i++ ) {
+    std::cout << distances[i].second << " " << distances[i].first << std::endl;
+  }
+
+}
+
+
+
+
 template <typename Point, typename PointRange>
-void record_hops_info(long array_index, Point query_point,
-                      const Graph<unsigned int> &G, const PointRange &Points,
+void record_hops_info(OptMetric opt_metric, long array_index,
+		      const Point &query_point,
+                      const Graph<unsigned int> &G,
+		      const PointRange &Points,
+		      const groundTruth<unsigned int> &GT,
                       const QueryParams &QP, parlay::sequence<int> &num_hops,
                       parlay::sequence<int> &num_hops_phase_1,
                       parlay::sequence<int> &num_hops_phase_2,
                       parlay::sequence<double> &time_phase_1,
                       parlay::sequence<double> &time_phase_2,
-                      parlay::sequence<double> &time_total, int top_n) {
-
-  parlay::sequence<float> distances_from_query_to_all = parlay::tabulate(
-      Points.size(), [&](long i) { return query_point.distance(Points[i]); });
-  parlay::sequence<size_t> distances_from_query_to_all_rank =
-      parlay::rank(distances_from_query_to_all);
-
+                      parlay::sequence<double> &time_total,
+		      parlay::sequence<double> &nn_beamsearch_time,
+		      int top_n,
+		      bool use_sls = true) {
   const parlay::sequence<unsigned int> starting_points = {0};
   auto r = parlayANN::beam_search_timestamp(query_point, G, Points,
                                             starting_points, QP);
@@ -71,41 +290,73 @@ void record_hops_info(long array_index, Point query_point,
   auto visited = visited_and_timestamp.first;
   parlay::sequence<double> visited_timestamp = visited_and_timestamp.second;
 
-  parlay::sequence<size_t> distance_visted_rank =
+  if (opt_metric == OptMetric::ALL ||
+      opt_metric == OptMetric::AVG_PHASE_2_TIME ||
+      opt_metric == OptMetric::AVG_PHASE_1_TIME) {
+    parlay::sequence<float> distances_from_query_to_all = parlay::tabulate(
+									   Points.size(), [&](long i) { return query_point.distance(Points[i]); });
+    parlay::sequence<size_t> distances_from_query_to_all_rank =
+      parlay::rank(distances_from_query_to_all);
+
+    parlay::sequence<size_t> distance_visited_rank =
       parlay::tabulate(visited.size(), [&](long i) {
         return distances_from_query_to_all_rank[visited[i].first];
       });
 
-  int phase_1_hops;
-  int phase_2_hops;
+    int phase_1_hops;
+    int phase_2_hops;
 
-  double phase_1;
-  double phase_2;
-  double total;
+    double phase_1_time;
+    double phase_2_time;
 
-  for (int i = 0; i < visited.size(); i++) {
-    if (distance_visted_rank[i] <= top_n) {
-      phase_1 =
-          visited_timestamp[i - 1 >= 0 ? i - 1 : 0] - visited_timestamp[0];
-      phase_2 = visited_timestamp[visited.size() - 1] - visited_timestamp[i];
-      phase_1_hops = i;
-      phase_2_hops = visited.size() - phase_1_hops;
-      break;
-    }
+    if (use_sls) {
+      const auto log1p_rank = parlay::tabulate(
+					       visited.size(),
+					       [&](size_t i) {
+						 return std::log1p(distance_visited_rank[i]);});
+      const auto num_hops = parlay::tabulate(visited.size(), [&](size_t i){return i;});
+      int breakpoint = segmented_least_squares(num_hops, log1p_rank);
+      phase_1_hops = breakpoint;
+      phase_2_hops = visited.size() - 1 - phase_1_hops;
+      phase_1_time = visited_timestamp[breakpoint] - visited_timestamp[0];
+      phase_2_time = visited_timestamp[visited.size() - 1] - visited_timestamp[breakpoint];
+    } else {
+      for (int i = 0; i < visited.size(); i++) {
+	if (distance_visited_rank[i] <= top_n) {
+	  phase_1_time =
+            visited_timestamp[i - 1 >= 0 ? i - 1 : 0] - visited_timestamp[0];
+	  phase_2_time = visited_timestamp[visited.size() - 1] - visited_timestamp[i];
+	  phase_1_hops = i;
+	  phase_2_hops = visited.size() - 1 - phase_1_hops;
+	  break;
+	}
+      }
+    } 
+    num_hops_phase_1[array_index] = phase_1_hops;
+    num_hops_phase_2[array_index] = phase_2_hops;
+    time_phase_1[array_index] = phase_1_time;
+    time_phase_2[array_index] = phase_2_time;
   }
-  num_hops_phase_1[array_index] = phase_1_hops;
-  num_hops_phase_2[array_index] = phase_2_hops;
+  if (opt_metric == OptMetric::ALL || opt_metric == OptMetric::NN_BEAMSEARCH_CONVERGENCE) {
+    nn_beamsearch_time[array_index] = nn_beamsearch_convergence_time(
+								     query_point,
+								     Points,
+								     G,
+								     GT,
+								     QP);
+    
+  }
   num_hops[array_index] = visited.size();
   time_total[array_index] =
       visited_timestamp[visited.size() - 1] - visited_timestamp[0];
-  time_phase_1[array_index] = phase_1;
-  time_phase_2[array_index] = phase_2;
 }
 
 template <typename PointRange>
-PhasesStats calculate_hops_phases(const Graph<unsigned int> &G,
+PhasesStats calculate_hops_phases(const OptMetric opt_metric,
+				  const Graph<unsigned int> &G,
                                   const PointRange &Points,
                                   const PointRange &QueryPoints,
+				  const groundTruth<unsigned int> &GT,
                                   const QueryParams &QP, const int top_n) {
   const size_t num_query_points = QueryPoints.size();
   parlay::sequence<int> num_hops_phase_1(num_query_points, 0);
@@ -115,11 +366,23 @@ PhasesStats calculate_hops_phases(const Graph<unsigned int> &G,
   parlay::sequence<double> time_phase_1(num_query_points, 0.0);
   parlay::sequence<double> time_phase_2(num_query_points, 0.0);
   parlay::sequence<double> time_total(num_query_points, 0.0);
-
+  parlay::sequence<double> nn_beamsearch_time(num_query_points, 0.0);
   parlay::parallel_for(0, num_query_points, [&](long i) {
-    return record_hops_info(i, QueryPoints[i], G, Points, QP, num_hops,
-                            num_hops_phase_1, num_hops_phase_2, time_phase_1,
-                            time_phase_2, time_total, top_n);
+    return record_hops_info(opt_metric,
+			    i,
+			    QueryPoints[i],
+			    G,
+			    Points,
+			    GT,
+			    QP,
+			    num_hops,
+                            num_hops_phase_1,
+			    num_hops_phase_2,
+			    time_phase_1,
+                            time_phase_2,
+			    time_total,
+			    nn_beamsearch_time,
+			    top_n);
   });
 
   PhasesStats stat = {
@@ -131,9 +394,47 @@ PhasesStats calculate_hops_phases(const Graph<unsigned int> &G,
       .time_phase_1_mean = parlay::reduce(time_phase_1) / num_query_points,
       .time_phase_2_mean = parlay::reduce(time_phase_2) / num_query_points,
       .time_total_mean = parlay::reduce(time_total) / num_query_points,
+      .time_nn_beamsearch_convergence_mean = parlay::reduce(nn_beamsearch_time) / num_query_points,
+      .num_hops_phase_1 = num_hops_phase_1,
+      .num_hops_phase_2 = num_hops_phase_2,
+      .num_hops = num_hops,
+      .time_phase_1 = time_phase_1,
+      .time_phase_2 = time_phase_2,
+      .time_total = time_total,
+      .nn_beamsearch_time = nn_beamsearch_time,
   };
   return stat;
 }
+
+
+
+void write_to_csv(std::string csv_filename, PhasesStats stat) {
+  csvfile csv(csv_filename);
+
+  csv << "point_index"
+  << "query_time_total"
+  << "query_time_phase_1"
+  << "query_time_phase_2"
+  << "nn_beamsearch_time"
+  << "query_num_hops_total" 
+  << "query_num_hops_phase_1"
+  << "query_num_hops_phase_2" << endrow;
+
+  
+  for (long i = 0; i < stat.time_phase_1.size(); i++) {
+    csv << i
+    << stat.time_total[i]
+    << stat.time_phase_1[i]
+    << stat.time_phase_2[i]
+    << stat.nn_beamsearch_time[i]
+    << stat.num_hops[i]
+    << stat.num_hops_phase_1[i]
+    << stat.num_hops_phase_2[i] << endrow;
+  }
+  csv << endrow;
+  csv << endrow;
+}
+
 
 int main(int argc, char *argv[]) {
   commandLine P(argc, argv,
@@ -147,12 +448,35 @@ int main(int argc, char *argv[]) {
                 "[-distance_origin <do>]<inFile>");
 
   char *iFile = P.getOptionValue("-base_path");
+  char *graph_file = P.getOptionValue("-graph_path");
   char *rFile =
-      P.getOptionValue("-res_path"); // path for result of making ANN index
+    P.getOptionValue("-res_path"); // path for result of making ANN index
   char *qFile = P.getOptionValue("-query_path");
   char *gtFile = P.getOptionValue("-gt_path");
   char *vectype = P.getOptionValue("-data_type");
+  char *metric = P.getOptionValue("-metric");
+  if (metric == NULL) {
+    std::cout << "need to specify a metric" << std::endl;
+    std::abort();
+  }
+  if (strcmp(metric, "avg_phase_1_time") &&
+      strcmp(metric, "avg_phase_2_time") &&
+      strcmp(metric, "avg_total_time") &&
+      strcmp(metric, "all") &&
+      strcmp(metric, "recall") &&
+      strcmp(metric, "nn_beamsearch")) {
+    std::cout << "-metric can only have one of the following values: avg_total_time, avg_phase_1_time, avg_phase_2_time, nn_beamsearch" << std::endl;
+    std::abort();
+  }
 
+  OptMetric opt_metric;
+  if (!strcmp(metric, "avg_phase_1_time")) opt_metric = OptMetric::AVG_PHASE_1_TIME;
+  if (!strcmp(metric, "avg_phase_2_time")) opt_metric = OptMetric::AVG_PHASE_2_TIME;
+  if (!strcmp(metric, "avg_total_time")) opt_metric = OptMetric::AVG_TOTAL_TIME;
+  if (!strcmp(metric, "all")) opt_metric = OptMetric::ALL;
+  if (!strcmp(metric, "recall")) opt_metric = OptMetric::RECALL;
+  if (!strcmp(metric, "nn_beamsearch")) opt_metric = OptMetric::NN_BEAMSEARCH_CONVERGENCE;
+  
   long Q = P.getOptionIntValue("-Q", 0);
   long R = P.getOptionIntValue("-R", 0);
   if (R < 0)
@@ -172,7 +496,7 @@ int main(int argc, char *argv[]) {
   double radius = P.getOptionDoubleValue("-radius", 0.0);
   double radius_2 = P.getOptionDoubleValue("-radius_2", radius);
   long k = P.getOptionIntValue("-k", 10);
-  if (k > 1000 || k < 0)
+  if ( k < 0)
     P.badArgument();
   double alpha = P.getOptionDoubleValue("-alpha", 1.0);
   int num_passes = P.getOptionIntValue("-num_passes", 1);
@@ -230,15 +554,22 @@ int main(int argc, char *argv[]) {
   }
   groundTruth<unsigned int> GT(gtFile);
   std::cout << GT.size() << std::endl;
+  
+
   if (tp == "float") {
     if (df == "Euclidian") {
       PointRange<Euclidian_Point<float>> Points(iFile);
       PointRange<Euclidian_Point<float>> QueryPoints(qFile);
-      if (normalize) {
-        for (int i = 0; i < Points.size(); i++)
-          Points[i].normalize();
-      }
-      Graph<unsigned int> G = Graph<unsigned int>(maxDeg, Points.size());
+      PointRange<Euclidian_Point<float>> EmptyPoints(NULL);
+      // for (int i = 0; i < 10; i++ ) {
+      // 	std::cout << GT.coordinates(0, i) << Points[0].distance(Points[GT.coordinates(0, i)]) << std::endl;
+      // }
+      
+      
+      
+      std::cout << "Number of points: " << Points.size() << std::endl;
+      std::cout << "Number of query points: " << QueryPoints.size() << std::endl;
+      std::cout << "Number of ground truth points: " << GT.size() << std::endl;
       if (quantize == 8) {
         using QT = uint8_t;
         using QPoint = Euclidian_Point<QT>;
@@ -255,8 +586,18 @@ int main(int argc, char *argv[]) {
       } else {
         using Point = Euclidian_Point<float>;
         using PR = PointRange<Point>;
-        ANN<Point, PR, unsigned int>(G, k, BP, QueryPoints, GT, NULL, false,
-                                     Points);
+	Point sample_query_point = QueryPoints[0];
+	// print_top_k_distance_neighbors<Point, PR>(sample_query_point, Points, GT, k);
+	// print_actual_topk_distance<Point, PR> (sample_query_point, Points, k);
+	Graph<unsigned int> G(maxDeg, Points.size());
+	if (graph_file == NULL) {
+	  G = Graph<unsigned int>(maxDeg, Points.size());
+	  ANN<Point, PR, unsigned int>(G, k, BP, EmptyPoints, GT, NULL, false,
+                                       Points);
+	} else {
+	  G = Graph<unsigned int>(graph_file);
+	}
+	
         QueryParams QP;
         QP.limit = limit != -1 ? limit : (long)G.size();
         QP.rerank_factor = rerank_factor;
@@ -265,17 +606,36 @@ int main(int argc, char *argv[]) {
         QP.k = k;
         QP.cut = cut;
         QP.beamSize = beam_size;
-        PhasesStats stat =
-            calculate_hops_phases<PR>(G, Points, QueryPoints, QP, top_n);
-        std::cout << stat.hops_total_mean << "," << stat.hops_phase_1_mean
-                  << "," << stat.hops_phase_2_mean << ","
-                  << stat.time_total_mean << "," << stat.time_phase_1_mean
-        << "," << stat.time_phase_2_mean << ",";
-
+	PhasesStats stat = {
+	  .hops_phase_1_mean = 0,
+	  .hops_phase_2_mean = 0,
+	  .hops_total_mean = 0,
+	  .time_phase_1_mean = 0,
+	  .time_phase_2_mean = 0,
+	  .time_total_mean = 0,
+	  .time_nn_beamsearch_convergence_mean = 0
+	};
+	if (opt_metric != OptMetric::RECALL) {
+	  print_opt_metric(opt_metric);
+	  stat =
+            calculate_hops_phases<PR>(opt_metric, G, Points, QueryPoints, GT, QP, top_n);
+	}
         nn_result recall_res = checkRecall<PR, PR, PR, unsigned int>(
             G, Points, QueryPoints, Points, QueryPoints, Points, QueryPoints,
 								     GT, false, 0, 10, QP, false);
-	std::cout << recall_res.recall << std::endl;
+	std::cout <<
+	stat.hops_total_mean << "," <<
+	stat.hops_phase_1_mean << "," <<
+	stat.hops_phase_2_mean << "," <<
+	stat.time_total_mean << "," <<
+	stat.time_phase_1_mean << "," <<
+	stat.time_phase_2_mean << "," <<
+	recall_res.recall << "," <<
+	stat.time_nn_beamsearch_convergence_mean << std::endl;
+	if (rFile != NULL) {
+	  std::string res_path(rFile);
+	  write_to_csv(res_path, stat);
+	}
       }
     }
   } else {

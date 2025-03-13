@@ -1,3 +1,5 @@
+import numpy as np
+import sys
 from pathlib import Path
 import argparse
 import matplotlib.pyplot as plt
@@ -122,9 +124,17 @@ def overlayed_phases_hops_graph(df_list: list[pd.DataFrame], filename: str):
     fig.savefig(filename, dpi=300)
 
 
+def scatter_plot_queries_against_time(df_list, filename:str):
+    fig, axes = plt.subplots(1)
+    axes.scatter(df_list[0]["point_index"], np.log(df_list[0]["query_time_phase_1"]), alpha = 0.1)
+    axes.scatter(df_list[0]["point_index"], np.log(df_list[0]["query_time_phase_2"]), alpha = 0.1)
+    fig.savefig(filename, dpi=300)
+    
+
+
 def overlayed_phases_time_graph(df_list: list[pd.DataFrame], filename: str):
-    fig, axes = plt.subplots(ncols = 1, nrows = 3, figsize = (7, 12))
-    _, fake_axes = plt.subplots(ncols = 1, nrows = 3, figsize = (7, 12))
+    fig, axes = plt.subplots(ncols = 1, nrows = 4, figsize = (7, 15))
+    _, fake_axes = plt.subplots(ncols = 1, nrows = 4, figsize = (7, 15))
     bins_1, bin_edges_1 = pd.cut(
         df_list[0]["query_time_phase_1"], bins=1000, retbins=True
     )
@@ -134,13 +144,19 @@ def overlayed_phases_time_graph(df_list: list[pd.DataFrame], filename: str):
     bins_total, bin_edges_total = pd.cut(
         df_list[0]["query_time_total"], bins=1000, retbins=True
     )
-    colors = ["r", "g", "b"]
-    y_space_phase_1 = 2000
-    og_y_space_phase_1 =7000
+    bins_nn_beamsearch, bin_edges_nn_beamsearch = pd.cut(
+        df_list[0]["nn_beamsearch_time"], bins=1000, retbins=True
+    )
+    colors = ["r", "g", "b", "yellow"]
+    y_space_phase_1 = 500
+    og_y_space_phase_1 =3000
     y_space_phase_2 = 2000
     og_y_space_phase_2 = 8000
     y_space_phase_total = 2000
     og_y_space_phase_total = 9000
+    y_space_nn_beamsearch = 3000
+    og_y_space_nn_beamsearch = 10000
+    
     for i in range(len(df_list)):
         n_1, x_1, _ = fake_axes[0].hist(
             df_list[i]["query_time_phase_1"],
@@ -151,7 +167,7 @@ def overlayed_phases_time_graph(df_list: list[pd.DataFrame], filename: str):
         )
         bin_centers_1 = 0.5 * (x_1[1:] + x_1[:-1])
         axes[0].plot(bin_centers_1, n_1, label=df_list[i].name, color=colors[i])
-        axes[0].text(0.00010, og_y_space_phase_1 - y_space_phase_1 * i, df_list[i].name + "\n" + df_list[i]["query_time_phase_1"].describe().loc[['mean', 'std']].to_string(), color = colors[i])
+        # axes[0].text(0.00010, og_y_space_phase_1 - y_space_phase_1 * i, df_list[i].name + "\n" + df_list[i]["query_time_phase_1"].describe().loc[['mean', 'std']].to_string(), color = colors[i])
         n_2, x_2, _ = fake_axes[1].hist(
             df_list[i]["query_time_phase_2"],
             bins=bin_edges_2,
@@ -159,10 +175,9 @@ def overlayed_phases_time_graph(df_list: list[pd.DataFrame], filename: str):
             label=df_list[i].name,
             color=colors[i],
         )
-        print(df_list[i]["query_time_phase_2"])
         bin_centers_2 = 0.5 * (x_2[1:] + x_2[:-1])
         axes[1].plot(bin_centers_2, n_2, label=df_list[i].name, color=colors[i])
-        axes[1].text(0.0001, og_y_space_phase_2 - y_space_phase_2 * i, df_list[i].name + '\n'  + df_list[i]["query_time_phase_2"].describe().loc[['mean', 'std']].to_string(), color = colors[i])
+        # axes[1].text(0.0001, og_y_space_phase_2 - y_space_phase_2 * i, df_list[i].name + '\n'  + df_list[i]["query_time_phase_2"].describe().loc[['mean', 'std']].to_string(), color = colors[i])
 
         n_total, x_total, _ = fake_axes[2].hist(
             df_list[i]["query_time_total"],
@@ -172,15 +187,32 @@ def overlayed_phases_time_graph(df_list: list[pd.DataFrame], filename: str):
             color=colors[i],
         )
         bin_centers_total = 0.5 * (x_total[1:] + x_total[:-1])
-        axes[1].plot(bin_centers_total, n_total, label=df_list[i].name, color=colors[i])
-        axes[1].text(0.0001, og_y_space_phase_total - y_space_phase_total * i, df_list[i].name + '\n'  + df_list[i]["query_time_total"].describe().loc[['mean', 'std']].to_string(), color = colors[i])
+        axes[2].plot(bin_centers_total, n_total, label=df_list[i].name, color=colors[i])
+        # axes[2].text(0.0001, og_y_space_phase_total - y_space_phase_total * i, df_list[i].name + '\n'  + df_list[i]["query_time_total"].describe().loc[['mean', 'std']].to_string(), color = colors[i])
+
+        n_nn_beamsearch, x_nn_beamsearch, _ = fake_axes[3].hist(
+            df_list[i]["nn_beamsearch_time"],
+            bins=bin_edges_total,
+            alpha=0.5,
+            label=df_list[i].name,
+            color=colors[i],
+        )
+        bin_centers_nn_beamsearch = 0.5 * (x_nn_beamsearch[1:] + x_nn_beamsearch[:-1])
+        axes[3].plot(bin_centers_nn_beamsearch, n_nn_beamsearch, label=df_list[i].name, color=colors[i])
+        # axes[3].text(0.0001, og_y_space_nn_beamsearch - y_space_nn_beamsearch * i, df_list[i].name + '\n'  + df_list[i]["nn_beamsearch_time"].describe().loc[['mean', 'std']].to_string(), color = colors[i])
 
     axes[0].set_xlim([-0.00001, 0.0003])
     axes[1].set_xlim([0.00001, 0.0003])
+    axes[2].set_xlim([0.00001, 0.0003])
+    axes[3].set_xlim([0.00001, 0.0003])
     axes[0].legend()
     axes[1].legend()
+    axes[2].legend()
+    axes[3].legend()
     axes[0].set_xlabel("search time spent in phase 1")
     axes[1].set_xlabel("search time spent in phase 2")
+    axes[2].set_xlabel("search time spent in total")
+    axes[3].set_xlabel("search time spent in nn beamsearch")
     try:
         os.remove(filename)
     except OSError:
@@ -190,11 +222,14 @@ def overlayed_phases_time_graph(df_list: list[pd.DataFrame], filename: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-ip", "--input-path", help="path to csv file", nargs="+", required=True)
+    parser.add_argument("-ip", "--input-path", help="path to csv file", nargs="+")
     parser.add_argument("-op", "--output-path", help="path to the png file", required = True)
-    parser.add_argument("-t", "--type", help = "type of graph you want to make", choices = ["all", "hops", "time"], required=True)
+    parser.add_argument("-t", "--type", help = "type of graph you want to make: all_data_one_graph means that you plot hops, time, etc data for just 1 graph; hops means that you can compare the number of hops of each graph for every query, likewise for time", choices = ["all_data_one_graph", "hops", "time", "scatter"], required=True)
     args = parser.parse_args()
-    if args.type == "all":
+    if args.type == "all_data_one_graph":
+        if len(args.input_path) > 1:
+            print("only one graph allowed")
+            sys.exit(1)
         df = pd.read_csv(args.input_path)
         graph_results(df, args.output_path)
     elif args.type == "hops":
@@ -207,6 +242,12 @@ if __name__ == "__main__":
         for i in range(len(args.input_path)):
             df_list[i].name = Path(args.input_path[i]).stem
         overlayed_phases_time_graph(df_list, args.output_path)
+
+    elif args.type == "scatter":
+        df_list = [pd.read_csv(csv_file) for csv_file in args.input_path]
+        for i in range(len(args.input_path)):
+            df_list[i].name = Path(args.input_path[i]).stem
+        scatter_plot_queries_against_time(df_list, "scatter.png")
         
 
     # # csv_files = [
