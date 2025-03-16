@@ -24,8 +24,28 @@
 #include "utils/types.h"
 #include "utils/csvfile.h"
 
-
 using namespace parlayANN;
+
+template<typename PointRange>
+parlay::sequence<parlay::sequence<int>> compute_groundtruth_rank(
+								    const PointRange &Points,
+								    const PointRange &QueryPoints,
+								    const parlay::sequence<unsigned int> starting_points) {
+  const parlay::sequence<parlay::sequence<int>> all_query_ranking =
+    parlay::tabulate(QueryPoints.size(), [&](long query_index) {
+      const parlay::sequence<float> distances_from_query_to_all = parlay::tabulate(
+									     Points.size(),
+									     [&](long i) {return QueryPoints[query_index].distance(Points[i]); });
+      const parlay::sequence<size_t> distances_from_query_to_all_rank =
+	parlay::rank(distances_from_query_to_all);
+      return parlay::tabulate(distances_from_query_to_all_rank.size(),
+			      [&] (long i) {
+				return static_cast<int>(distances_from_query_to_all_rank[i]);
+			      });
+    });
+  
+  return all_query_ranking;
+}
 
 
 
@@ -269,11 +289,12 @@ void print_actual_topk_distance(const Point &query_point,
 
 
 template <typename Point, typename PointRange>
-void record_hops_info(OptMetric opt_metric, long array_index,
+void record_hops_info(OptMetric opt_metric, long query_index,
 		      const Point &query_point,
                       const Graph<unsigned int> &G,
 		      const PointRange &Points,
 		      const groundTruth<unsigned int> &GT,
+		      const parlay::sequence<parlay::sequence<int>> &GT_ranking,
                       const QueryParams &QP, parlay::sequence<int> &num_hops,
                       parlay::sequence<int> &num_hops_phase_1,
                       parlay::sequence<int> &num_hops_phase_2,
@@ -293,16 +314,6 @@ void record_hops_info(OptMetric opt_metric, long array_index,
   if (opt_metric == OptMetric::ALL ||
       opt_metric == OptMetric::AVG_PHASE_2_TIME ||
       opt_metric == OptMetric::AVG_PHASE_1_TIME) {
-    parlay::sequence<float> distances_from_query_to_all = parlay::tabulate(
-									   Points.size(), [&](long i) { return query_point.distance(Points[i]); });
-    parlay::sequence<size_t> distances_from_query_to_all_rank =
-      parlay::rank(distances_from_query_to_all);
-
-    parlay::sequence<size_t> distance_visited_rank =
-      parlay::tabulate(visited.size(), [&](long i) {
-        return distances_from_query_to_all_rank[visited[i].first];
-      });
-
     int phase_1_hops;
     int phase_2_hops;
 
@@ -313,7 +324,7 @@ void record_hops_info(OptMetric opt_metric, long array_index,
       const auto log1p_rank = parlay::tabulate(
 					       visited.size(),
 					       [&](size_t i) {
-						 return std::log1p(distance_visited_rank[i]);});
+						 return std::log1p(GT_ranking[query_index][i]);});
       const auto num_hops = parlay::tabulate(visited.size(), [&](size_t i){return i;});
       int breakpoint = segmented_least_squares(num_hops, log1p_rank);
       phase_1_hops = breakpoint;
@@ -322,7 +333,7 @@ void record_hops_info(OptMetric opt_metric, long array_index,
       phase_2_time = visited_timestamp[visited.size() - 1] - visited_timestamp[breakpoint];
     } else {
       for (int i = 0; i < visited.size(); i++) {
-	if (distance_visited_rank[i] <= top_n) {
+	if (GT_ranking[query_index][i] <= top_n) {
 	  phase_1_time =
             visited_timestamp[i - 1 >= 0 ? i - 1 : 0] - visited_timestamp[0];
 	  phase_2_time = visited_timestamp[visited.size() - 1] - visited_timestamp[i];
@@ -332,13 +343,13 @@ void record_hops_info(OptMetric opt_metric, long array_index,
 	}
       }
     } 
-    num_hops_phase_1[array_index] = phase_1_hops;
-    num_hops_phase_2[array_index] = phase_2_hops;
-    time_phase_1[array_index] = phase_1_time;
-    time_phase_2[array_index] = phase_2_time;
+    num_hops_phase_1[query_index] = phase_1_hops;
+    num_hops_phase_2[query_index] = phase_2_hops;
+    time_phase_1[query_index] = phase_1_time;
+    time_phase_2[query_index] = phase_2_time;
   }
   if (opt_metric == OptMetric::ALL || opt_metric == OptMetric::NN_BEAMSEARCH_CONVERGENCE) {
-    nn_beamsearch_time[array_index] = nn_beamsearch_convergence_time(
+    nn_beamsearch_time[query_index] = nn_beamsearch_convergence_time(
 								     query_point,
 								     Points,
 								     G,
@@ -346,8 +357,8 @@ void record_hops_info(OptMetric opt_metric, long array_index,
 								     QP);
     
   }
-  num_hops[array_index] = visited.size();
-  time_total[array_index] =
+  num_hops[query_index] = visited.size();
+  time_total[query_index] =
       visited_timestamp[visited.size() - 1] - visited_timestamp[0];
 }
 
@@ -357,6 +368,7 @@ PhasesStats calculate_hops_phases(const OptMetric opt_metric,
                                   const PointRange &Points,
                                   const PointRange &QueryPoints,
 				  const groundTruth<unsigned int> &GT,
+				  const parlay::sequence<parlay::sequence<int>> &GT_ranking,
                                   const QueryParams &QP, const int top_n) {
   const size_t num_query_points = QueryPoints.size();
   parlay::sequence<int> num_hops_phase_1(num_query_points, 0);
@@ -374,6 +386,7 @@ PhasesStats calculate_hops_phases(const OptMetric opt_metric,
 			    G,
 			    Points,
 			    GT,
+			    GT_ranking,
 			    QP,
 			    num_hops,
                             num_hops_phase_1,
@@ -453,6 +466,7 @@ int main(int argc, char *argv[]) {
     P.getOptionValue("-res_path"); // path for result of making ANN index
   char *qFile = P.getOptionValue("-query_path");
   char *gtFile = P.getOptionValue("-gt_path");
+  char *gtRankingFile = P.getOptionValue("-gt_rank_path");  
   char *vectype = P.getOptionValue("-data_type");
   char *metric = P.getOptionValue("-metric");
   if (metric == NULL) {
@@ -553,6 +567,8 @@ int main(int argc, char *argv[]) {
     abort();
   }
   groundTruth<unsigned int> GT(gtFile);
+
+  
   std::cout << GT.size() << std::endl;
   
 
@@ -561,11 +577,7 @@ int main(int argc, char *argv[]) {
       PointRange<Euclidian_Point<float>> Points(iFile);
       PointRange<Euclidian_Point<float>> QueryPoints(qFile);
       PointRange<Euclidian_Point<float>> EmptyPoints(NULL);
-      // for (int i = 0; i < 10; i++ ) {
-      // 	std::cout << GT.coordinates(0, i) << Points[0].distance(Points[GT.coordinates(0, i)]) << std::endl;
-      // }
-      
-      
+            
       
       std::cout << "Number of points: " << Points.size() << std::endl;
       std::cout << "Number of query points: " << QueryPoints.size() << std::endl;
@@ -597,6 +609,33 @@ int main(int argc, char *argv[]) {
 	} else {
 	  G = Graph<unsigned int>(graph_file);
 	}
+	parlay::sequence<unsigned int> starting_points{0};
+	parlay::sequence<parlay::sequence<int>> GT_ranking;
+	if (gtRankingFile != NULL) {
+	  // std::cout << "Loading instead of computing" << std::endl;
+	  auto [fileptr, length] = mmapStringFromFile(gtRankingFile);
+	  int num_query_vectors = *((int*) fileptr);
+	  int num_base_vectors = *((int*) (fileptr + sizeof(int)));
+    
+	  int* start_ranking =  (int*) (fileptr + 2 * sizeof(int));
+	  int* end_ranking = start_ranking + num_query_vectors * num_base_vectors;
+    
+	  auto ranking_flat = parlay::slice(start_ranking, end_ranking);
+	  for (int i = 0; i < num_query_vectors; i++) {
+	    // const auto slice_i = parlay::slice(ranking_flat.begin() + i * num_base_vectors,
+								// ranking_flat.begin() + (i + 1) * num_base_vectors);
+								GT_ranking.push_back(parlay::to_sequence(parlay::slice(
+														       ranking_flat.begin() + i * num_base_vectors,
+														       ranking_flat.begin() + (i + 1) * num_base_vectors)));
+	  }
+	} else {
+	  GT_ranking = compute_groundtruth_rank<PR>(Points,
+						QueryPoints,
+						starting_points);
+	}
+	
+	
+
 	
         QueryParams QP;
         QP.limit = limit != -1 ? limit : (long)G.size();
@@ -618,11 +657,31 @@ int main(int argc, char *argv[]) {
 	if (opt_metric != OptMetric::RECALL) {
 	  print_opt_metric(opt_metric);
 	  stat =
-            calculate_hops_phases<PR>(opt_metric, G, Points, QueryPoints, GT, QP, top_n);
+            calculate_hops_phases<PR>(
+				      opt_metric,
+				      G,
+				      Points,
+				      QueryPoints,
+				      GT,
+				      GT_ranking,
+				      QP,
+				      top_n);
 	}
         nn_result recall_res = checkRecall<PR, PR, PR, unsigned int>(
-            G, Points, QueryPoints, Points, QueryPoints, Points, QueryPoints,
-								     GT, false, 0, 10, QP, false);
+								     G,
+								     Points,
+								     QueryPoints,
+								     Points,
+								     QueryPoints,
+								     Points,
+								     QueryPoints,
+								     GT,
+								     false,
+								     0,
+								     10,
+								     QP,
+								     false);
+	
 	std::cout <<
 	stat.hops_total_mean << "," <<
 	stat.hops_phase_1_mean << "," <<

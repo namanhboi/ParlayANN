@@ -21,10 +21,12 @@ def objective(
         base_path,
         query_path,
         gt_path,
+        gt_rank_path,
         metric,
         trial):
     R = trial.suggest_int("R", 10, 200)
-    L = 200
+    L = trial.suggest_int("L", 150, 210)
+
     alpha = trial.suggest_float("alpha", 1, 2, step=0.005)
 
     args = [
@@ -47,9 +49,12 @@ def objective(
         query_path,
         "-gt_path",
         gt_path,
+        "-gt_rank_path",
+        gt_rank_path,
         "-metric",
         metric
     ]
+    
     results = subprocess.run(args, capture_output=True, text=True)
     num_hops = results.stdout.strip("\n").splitlines()[-1]
     (
@@ -76,10 +81,12 @@ def objective(
     print(f"recall is {recall}, {metric} is {metrics_dict[metric]}")
     return metrics_dict[metric] if recall > 0.80 else 1
 
+
 def make_vamana_graph(
         base_path: str,
         query_path: str,
         gt_path: str ,
+        gt_rank_path: str ,        
         r: int,
         l: int,
         alpha: float,
@@ -106,6 +113,8 @@ def make_vamana_graph(
         query_path,
         "-gt_path",
         gt_path,
+        "-gt_rank_path",
+        gt_rank_path,
         "-graph_outfile",
         graph_outfile
         
@@ -148,6 +157,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "-gt_path",
         help="path containing all the groundtruth data for the query points",
+        required = True)
+    parser.add_argument(
+        "-gt_rank_path",
+        help="path containing all the groundtruth rank data for the query points",
         required = True)
     parser.add_argument(
         "-metric",
@@ -201,7 +214,9 @@ if __name__ == "__main__":
                 objective,
                 args.base_path,
                 args.query_path,
-                args.gt_path, metric),
+                args.gt_path,
+                args.gt_rank_path,
+                metric),
             args.num_trials)
         write_best_trial_to_file(
             metric,
@@ -214,6 +229,7 @@ if __name__ == "__main__":
                 base_path=args.base_path,
                 query_path=args.query_path,
                 gt_path=gt_path,
+                gt_rank_path=gt_rank_path,
                 r=int(study.best_params["r"]),
                 l=int(study.best_params["l"]),
                 alpha=study.best_params["alpha"],
