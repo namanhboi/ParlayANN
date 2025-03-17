@@ -212,6 +212,7 @@ int main(int argc, char* argv[]) {
   if (ranking) {
     if (tp == "float") {
       if (df == "Euclidian") {
+	std::cout << "will write ranking" << std::endl;
 	auto Points = PointRange<Euclidian_Point<float>>(bFile);
 	auto QueryPoints = PointRange<Euclidian_Point<float>>(qFile);
 	const parlay::sequence<unsigned int> starting_points = {0};

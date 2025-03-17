@@ -612,7 +612,7 @@ int main(int argc, char *argv[]) {
 	parlay::sequence<unsigned int> starting_points{0};
 	parlay::sequence<parlay::sequence<int>> GT_ranking;
 	if (gtRankingFile != NULL) {
-	  // std::cout << "Loading instead of computing" << std::endl;
+	  std::cout << "Loading instead of computing" << std::endl;
 	  auto [fileptr, length] = mmapStringFromFile(gtRankingFile);
 	  int num_query_vectors = *((int*) fileptr);
 	  int num_base_vectors = *((int*) (fileptr + sizeof(int)));

@@ -132,7 +132,10 @@ def scatter_plot_queries_against_time(df_list, filename:str):
     
 
 
-def overlayed_phases_time_graph(df_list: list[pd.DataFrame], filename: str):
+def overlayed_phases_time_graph(
+        df_list: list[pd.DataFrame],
+        filename: str,
+        xlim: list[float]):
     fig, axes = plt.subplots(ncols = 1, nrows = 4, figsize = (7, 15))
     _, fake_axes = plt.subplots(ncols = 1, nrows = 4, figsize = (7, 15))
     bins_1, bin_edges_1 = pd.cut(
@@ -201,10 +204,10 @@ def overlayed_phases_time_graph(df_list: list[pd.DataFrame], filename: str):
         axes[3].plot(bin_centers_nn_beamsearch, n_nn_beamsearch, label=df_list[i].name, color=colors[i])
         # axes[3].text(0.0001, og_y_space_nn_beamsearch - y_space_nn_beamsearch * i, df_list[i].name + '\n'  + df_list[i]["nn_beamsearch_time"].describe().loc[['mean', 'std']].to_string(), color = colors[i])
 
-    axes[0].set_xlim([-0.00001, 0.0003])
-    axes[1].set_xlim([0.00001, 0.0003])
-    axes[2].set_xlim([0.00001, 0.0003])
-    axes[3].set_xlim([0.00001, 0.0003])
+    axes[0].set_xlim(xlim)
+    axes[1].set_xlim(xlim)
+    axes[2].set_xlim(xlim)
+    axes[3].set_xlim(xlim)
     axes[0].legend()
     axes[1].legend()
     axes[2].legend()
@@ -225,6 +228,7 @@ if __name__ == "__main__":
     parser.add_argument("-ip", "--input-path", help="path to csv file", nargs="+")
     parser.add_argument("-op", "--output-path", help="path to the png file", required = True)
     parser.add_argument("-t", "--type", help = "type of graph you want to make: all_data_one_graph means that you plot hops, time, etc data for just 1 graph; hops means that you can compare the number of hops of each graph for every query, likewise for time", choices = ["all_data_one_graph", "hops", "time", "scatter"], required=True)
+    
     args = parser.parse_args()
     if args.type == "all_data_one_graph":
         if len(args.input_path) > 1:
@@ -241,7 +245,11 @@ if __name__ == "__main__":
         df_list = [pd.read_csv(csv_file) for csv_file in args.input_path]
         for i in range(len(args.input_path)):
             df_list[i].name = Path(args.input_path[i]).stem
-        overlayed_phases_time_graph(df_list, args.output_path)
+        overlayed_phases_time_graph(
+            df_list,
+            args.output_path,
+            [0.0, 0.009]
+        )
 
     elif args.type == "scatter":
         df_list = [pd.read_csv(csv_file) for csv_file in args.input_path]

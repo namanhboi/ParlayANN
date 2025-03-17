@@ -4,6 +4,7 @@ import argparse
 from functools import partial
 import subprocess
 import optuna
+from make_vamana_graph import make_vamana_graph
 
 base_path = "/home/nd433/big-ann-benchmarks/data/MSSPACEV1B/spacev1b_base.i8bin.crop_nb_1000000"
 query_path = "/home/nd433/big-ann-benchmarks/data/MSSPACEV1B/private_query_30k.bin"
@@ -82,44 +83,6 @@ def objective(
     return metrics_dict[metric] if recall > 0.80 else 1
 
 
-def make_vamana_graph(
-        base_path: str,
-        query_path: str,
-        gt_path: str ,
-        gt_rank_path: str ,        
-        r: int,
-        l: int,
-        alpha: float,
-        output_folder: str,
-        extra_info: str = ""):
-    """
-    create a vamana graph in the [output_folder] with name
-    """
-    alpha_int, alpha_decimal = str(alpha).split(".")
-    graph_outfile = os.path.join(output_folder, f"vamana_{extra_info}_{r}_{l}_{alpha_int}_{alpha_decimal}")
-    args = [
-        vamana_binary_path,
-        "-R",
-        str(r),
-        "-L",
-        str(l),
-        "-data_type",
-        "float",
-        "-dist_func",
-        "Euclidian",
-        "-base_path",
-        base_path,
-        "-query_path",
-        query_path,
-        "-gt_path",
-        gt_path,
-        "-gt_rank_path",
-        gt_rank_path,
-        "-graph_outfile",
-        graph_outfile
-        
-    ]
-    subprocess.run(args)
 
 def write_best_trial_to_file(
         metric: str,
