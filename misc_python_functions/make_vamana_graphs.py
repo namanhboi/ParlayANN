@@ -38,6 +38,7 @@ def make_vamana_graph(
         graph_outfile,
     ]
     res = subprocess.run(args, capture_output=True, text=True)
+    
     alpha_int, alpha_decimal = str(alpha).split(".")
     result_file = f"vamana_{r}_{l}_{alpha_int}_{alpha_decimal}.txt"
     with open(result_file, "w") as f:

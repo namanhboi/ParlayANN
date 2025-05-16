@@ -1,6 +1,8 @@
 /*
   this file runs a bunch of queries on a prebuilt graph and then write the visited nodes for each query onto an output file
 
+  if the res_path is provided then it will also run a beamsearch sweep to check recall of graph
+
 */
 
 #include <iostream>
@@ -18,10 +20,31 @@
 #include "utils/point_range.h"
 #include "utils/euclidian_point.h"
 #include "utils/beamSearch.h"
-
+#include "utils/stats.h"
 using namespace parlayANN;
 
 // ./vbase_graph -base_path ../data/sift/sift_learn.fbin -graph_path ../data/sift/sift_learn_32_64 -data_type float -dist_func Euclidian
+
+
+template<typename indexType, typename Point>
+struct VisitedNodeInfo {
+  indexType node_index;
+  parlay::sequence<std::pair<indexType, typename Point::distanceType>> frontier;
+  double distance_to_query;
+  size_t distance_to_query_rank;
+  double timestamp_visit;
+};
+
+
+template<typename indexType, typename Point>
+struct QueryTraversalFrontierHistoryInfo {
+  long query_index;
+
+  parlay::sequence<VisitedNodeInfo<indexType, Point>> visited_nodes;
+  
+  // number of distance comparisons
+  size_t num_dist_cmps;
+};
 
 
 struct QueryTraversalInfo {
@@ -29,6 +52,41 @@ struct QueryTraversalInfo {
   // first element is index of visited node, second is rank, third is timestamp
   parlay::sequence<std::tuple<unsigned int, size_t, double>> visited_nodes;
 };
+
+
+//   res << "query_index,node_index,distance_to_query,distance_to_query_rank,timestamp_visit,frontier\n";
+template<typename indexType, typename Point>
+std::string query_traversal_frontier_history_info_to_string(QueryTraversalFrontierHistoryInfo<indexType, Point> &info) {
+  std::stringstream res("");
+  for (auto &visited_node_info : info.visited_nodes) {
+    res << info.query_index << ","
+    << visited_node_info.node_index << ","
+    << visited_node_info.distance_to_query << ","
+    << visited_node_info.distance_to_query_rank << ","
+    << std::fixed << std::setprecision(15) << visited_node_info.timestamp_visit << ",\"[";
+    for (int i = 0; i < visited_node_info.frontier.size(); i++) {
+      if (i != visited_node_info.frontier.size() - 1) {
+	res << visited_node_info.frontier[i].first << ",";
+      } else {
+	res << visited_node_info.frontier[i].first << "]\"\n";
+      }
+    }
+  }
+  return res.str();
+}
+
+template<typename indexType, typename Point>
+void write_query_traversal_frontier_history_info_to_file(
+							 parlay::sequence<QueryTraversalFrontierHistoryInfo<indexType, Point>> traversal_info,
+							 std::string output_filename) {
+  std::ofstream output_file;
+  output_file.open(output_filename, std::ios_base::app);
+  output_file << "query_index,node_index,distance_to_query,distance_to_query_rank,timestamp_visit,frontier\n";
+  for (int i = 0; i < traversal_info.size(); i++) {
+    output_file << query_traversal_frontier_history_info_to_string(traversal_info[i]);
+  }
+  output_file.close();
+}
 
 
 std::string visited_nodes_to_string(parlay::sequence<std::tuple<unsigned int, size_t, double>> visited_nodes) {
@@ -74,6 +132,7 @@ int main(int argc, char* argv[]) {
   char* iFile = P.getOptionValue("-base_path"); // path to points
   char* gFile = P.getOptionValue("-graph_path"); // path to already generated graph
   char* qFile = P.getOptionValue("-query_path");
+  char* resFile = P.getOptionValue("-res_path");
   std::string outputFile = P.getOptionValue("-output_path", "data.csv");
   std::filesystem::path output_path {outputFile};
   if (std::filesystem::exists(output_path)) std::filesystem::remove(output_path);
@@ -90,6 +149,8 @@ int main(int argc, char* argv[]) {
   int k = P.getOptionIntValue("-k", 10);
   int beam_size = P.getOptionIntValue("-beam_size", 10);
   double cut = P.getOptionDoubleValue("-cut", 1.35);
+
+  bool frontier_history = P.getOption("-frontier_history");
   
   std::random_device rd;
   std::mt19937 gen(rd()); // seed
@@ -120,34 +181,76 @@ int main(int argc, char* argv[]) {
       QP.k = k;
       QP.cut = cut ;
       QP.beamSize = beam_size;
-      parlay::sequence<QueryTraversalInfo> traversal_info = parlay::tabulate(QueryPoints.size(), [&] (long query_index) {
-	Point query_point = QueryPoints[query_index];
-	parlay::sequence<float> distances_from_query_to_all = parlay::tabulate(Points.size(), [&](long i) {
-	  return query_point.distance(Points[i]);
-	});
 
-	parlay::sequence<size_t> distances_from_query_to_all_rank = parlay::rank(distances_from_query_to_all);
+      Graph_ G_(name, params, G.size(), avg_deg, max_deg, idx_time);
+
+
+
+      if (!frontier_history) {
+	parlay::sequence<QueryTraversalInfo> traversal_info = parlay::tabulate(QueryPoints.size(), [&] (long query_index) {
+	  Point query_point = QueryPoints[query_index];
+	  parlay::sequence<float> distances_from_query_to_all = parlay::tabulate(Points.size(), [&](long i) {
+	    return query_point.distance(Points[i]);
+	  });
+
+	  parlay::sequence<size_t> distances_from_query_to_all_rank = parlay::rank(distances_from_query_to_all);
 	
-	auto beam_search_res =  beam_search_timestamp(query_point, G, Points, starting_points,  QP);
-	auto visited_and_timestamp = beam_search_res.first.second;
-	auto visited = visited_and_timestamp.first;
-	parlay::sequence<double> visited_timestamp = visited_and_timestamp.second;
-	parlay::sequence<size_t> distance_visited_rank = parlay::tabulate(visited.size(), [&] (long i) {
-	  return distances_from_query_to_all_rank[visited[i].first];
-	});
-	parlay::sequence<std::tuple<unsigned int, size_t, double>> vis_info=  parlay::tabulate(visited.size(), [&] (long i) {
+	  auto beam_search_res =  beam_search_timestamp(query_point, G, Points, starting_points,  QP);
+	  auto visited_and_timestamp = beam_search_res.first.second;
+	  auto visited = visited_and_timestamp.first;
+	  parlay::sequence<double> visited_timestamp = visited_and_timestamp.second;
+	  parlay::sequence<size_t> distance_visited_rank = parlay::tabulate(visited.size(), [&] (long i) {
+	    return distances_from_query_to_all_rank[visited[i].first];
+	  });
+	  parlay::sequence<std::tuple<unsigned int, size_t, double>> vis_info=  parlay::tabulate(visited.size(), [&] (long i) {
 	    return std::make_tuple(visited[i].first, distance_visited_rank[i], visited_timestamp[i]);
-	});
+	  });
 
-	QueryTraversalInfo traversal_res = {
-	  .query_index = query_index,
-	  .visited_nodes = vis_info
-	};
-	return traversal_res;
+	  QueryTraversalInfo traversal_res = {
+	    .query_index = query_index,
+	    .visited_nodes = vis_info
+	  };
+	  return traversal_res;
 	
-      });
-      write_query_traversal_info_to_file(traversal_info);
+	});
+	write_query_traversal_info_to_file(traversal_info);
+      } else {	
+	parlay::sequence<QueryTraversalFrontierHistoryInfo<unsigned int, Point>> traversal_info = parlay::tabulate(QueryPoints.size(), [&] (long query_index) {
+	  Point query_point = QueryPoints[query_index];
+	  parlay::sequence<float> distances_from_query_to_all = parlay::tabulate(Points.size(), [&](long i) {
+	    return query_point.distance(Points[i]);
+	  });
 
+	  parlay::sequence<size_t> distances_from_query_to_all_rank = parlay::rank(distances_from_query_to_all);
+
+	  auto beam_search_res = beam_search_timestamp_and_candidate_list(query_point, G, Points, starting_points,  QP);
+	
+	  beamSearchInfo beam_search_info = beam_search_res.first;
+	  size_t num_dist_cmps = beam_search_res.second;
+
+	  parlay::sequence<size_t> distance_visited_rank = parlay::tabulate(beam_search_info.not_sorted_visited.size(), [&] (long i) {
+	    return distances_from_query_to_all_rank[beam_search_info.not_sorted_visited[i].first];
+	  });
+
+	  parlay::sequence<VisitedNodeInfo<unsigned int, Point>> visited_node_info = parlay::tabulate(beam_search_info.not_sorted_visited.size(), [&] (long i) {
+	    VisitedNodeInfo<unsigned int, Point> info;
+	    info.node_index = beam_search_info.not_sorted_visited[i].first;
+	    info.frontier = beam_search_info.frontier_history[i];
+	    info.distance_to_query = distances_from_query_to_all[info.node_index];
+	    info.distance_to_query_rank = distances_from_query_to_all_rank[info.node_index];
+	    info.timestamp_visit = beam_search_info.visited_timestamp[i];
+	    return info;
+	  });
+
+	  QueryTraversalFrontierHistoryInfo<unsigned int, Point> traversal_res = {
+	    .query_index = query_index,
+	    .visited_nodes = visited_node_info,
+	    .num_dist_cmps = num_dist_cmps
+	  };
+	  return traversal_res;
+	});
+	write_query_traversal_frontier_history_info_to_file(traversal_info, outputFile);
+      }
       
     } else abort_with_message("Other distance functions are not supported at this moment");
   } else abort_with_message("Other vector types are not supported at this moment");
