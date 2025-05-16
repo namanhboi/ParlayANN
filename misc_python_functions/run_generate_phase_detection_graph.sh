@@ -1,0 +1,1 @@
+python generate_phase_detection_graph.py -ip ../data_tools/querying_result_nn_beamsearch_70_189_1_13.csv  ../data_tools/querying_result_phase_1_84_145_1_105.csv  ../data_tools/querying_result_phase_2_77_171_1_125.csv  ../data_tools/querying_result_total_time_77_166_1_12.csv -op openai_phase_time_graph.png -t time

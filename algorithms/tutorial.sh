@@ -3,7 +3,7 @@
 cd vamana
 make
 echo "Vamana:"
-./neighbors -R 32 -L 64 -a 1.2 -graph_outfile ../../data/sift/sift_learn_32_64 -query_path ../../data/sift/sift_query.fvecs -gt_path ../../data/sift/sift-100K -res_path tutorial.csv -data_type float -file_type vec -dist_func Euclidian -base_path ../../data/sift/sift_learn.fvecs
+./neighbors -R 32 -L 64 -alpha 1.2 -graph_outfile ../../data/sift/sift_learn_32_64 -data_type float -dist_func Euclidian -base_path ../../data/sift/sift_learn.fbin
 
 echo "" 
 echo "" 
@@ -11,7 +11,8 @@ echo ""
 cd ../HCNNG
 make
 echo "HCNNG:"
-./neighbors -R 3 -L 10 -a 1000 -memory_flag 1 -graph_outfile ../../data/sift/sift_learn_3_10 -query_path ../../data/sift/sift_query.fvecs -gt_path ../../data/sift/sift-100K -res_path tutorial.csv -data_type float -file_type vec -dist_func Euclidian -base_path ../../data/sift/sift_learn.fvecs
+./neighbors -cluster_size 1000 -mst_deg 3 -num_clusters 30  -graph_outfile ../../data/sift/sift_learn_3_10 -query_path ../../data/sift/sift_query.fbin -gt_path ../../data/sift/sift-100K -res_path ../../data/hcnng_res.csv -data_type float -dist_func Euclidian -base_path ../../data/sift/sift_learn.fbin
+
 
 echo ""
 echo ""
@@ -19,4 +20,5 @@ echo ""
 cd ../pyNNDescent
 make
 echo "pyNNDescent:"
-./neighbors -R 30 -L 100 -a 10 -d 1.2 -graph_outfile ../../data/sift/sift_learn_30 -query_path ../../data/sift/sift_query.fvecs -gt_path ../../data/sift/sift-100K -res_path tutorial.csv -data_type float -file_type vec -dist_func Euclidian -base_path ../../data/sift/sift_learn.fvecs
+./neighbors -R 40 -cluster_size 100 -num_clusters 10 -alpha 1.2 -delta 0.05 -graph_outfile ../../data/sift/sift_learn_30 -query_path ../../data/sift/sift_query.fbin -gt_path ../../data/sift/sift-100K -res_path ../../data/pynn_res.csv -data_type float -dist_func Euclidian -base_path ../../data/sift/sift_learn.fbin
+

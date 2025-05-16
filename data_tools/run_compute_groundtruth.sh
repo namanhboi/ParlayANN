@@ -1,0 +1,1 @@
+./compute_groundtruth  -data_type float -dist_func Euclidian -base_path ~/big-ann-benchmarks/data/OpenAIArXiv/openai_base.bin.crop_nb_100000 -query_path ~/big-ann-benchmarks/data/OpenAIArXiv/openai_query.bin -gt_path ~/big-ann-benchmarks/data/OpenAIArXiv/openai_gt_rank -gt_rank_path -k 10 -ranking

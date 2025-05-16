@@ -1,0 +1,7 @@
+# ./record_query_traversal_path -base_path ~/WEAVESS/dataset/gist/gist_base.fvecs -graph_path ~/vecdb_icml_project/graphs/hnsw/gist_hnsw.hnsw -query_path  ~/WEAVESS/dataset/gist/gist_query.fvecs  -data_type float -dist_func Euclidian --output-path ~/vecdb_icml_project/query_traversal/gist_hnsw.csv
+# ./record_query_traversal_path -base_path ~/WEAVESS/dataset/gist/gist_base.fbin -graph_path /home/nd433/vecdb_icml_project/graphs/pynndescent/gist_sample_pynndescent -query_path ~/WEAVESS/dataset/gist/gist_query.fbin  -data_type float -dist_func Euclidian -output_path ~/vecdb_icml_project/graphs/pynndescent/gist_sample_pynndescent_query_traversal_info.csv -frontier_history
+# ./record_query_traversal_path -base_path ~/WEAVESS/dataset/gist/gist_base.fbin -graph_path ~/vecdb_icml_project/graphs/vamana/gist/vamana_gist_32_64_1_2 -query_path ~/WEAVESS/dataset/gist/gist_query.fbin -data_type float -dist_func Euclidian -output_path ~/vecdb_icml_project/graphs/vamana/gist/vamana_gist_32_64_1_2_query_traversal_info.csv -frontier_history
+
+
+
+ ./record_query_traversal_path -base_path ~/WEAVESS/dataset/crawl/crawl_base.fbin -graph_path /home/nd433/vecdb_icml_project/graphs/hcnng/crawl/hcnng_crawl_2000_40 -query_path ~/WEAVESS/dataset/crawl/crawl_query.fbin -data_type float -dist_func Euclidian -output_path ~/vecdb_icml_project/graphs/hcnng/crawl/hcnng_crawl_2000_40_query_traversal_info.csv -frontier_history

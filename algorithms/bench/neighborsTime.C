@@ -22,6 +22,7 @@
 
 #include <iostream>
 #include <algorithm>
+#include <map>
 #include "parlay/parallel.h"
 #include "parlay/primitives.h"
 #include "parse_command_line.h"
@@ -47,26 +48,105 @@ using namespace parlayANN;
 using uint = unsigned int;
 
 
+// template<typename Point, typename PointRange, typename indexType>
+// parlay::sequence<float> graph_distances_from_origin(PointRange &Points, long origin) {
+//   parlay::sequence<float> distances = parlay::sequence<float>(Points.size(), 0.0);
+//   parlay::parallel_for(0, Points.size(), [&](long i) {
+//     distances[i] = Points[origin].distance(Points[i]);
+//   });
+
+//   return distances;
+// }
+
+
+
+// /**
+// returns the median distance from the root vector 0 to all other vectors.
+
+// */
+// float median_distance(parlay::sequence<float> distances) {
+//   int k = distances.size() / 2;
+  
+//   return *parlay::kth_smallest(distances, k);
+  
+// }
+
+// /**returns the min and max distances from the root vector to all other vectors*/
+// std::pair<float, float>  min_max_distance(parlay::sequence<float> distances) {
+//   std::pair<float*, float*> tmp = parlay::minmax_element(distances);
+//   return std::make_pair(*tmp.first, *tmp.second);
+// }
+
+
+// /**returns the average distance from the root vector to all other vectors */
+// float average_distance(parlay::sequence<float> distances) {
+//   return parlay::reduce(distances) / distances.size();
+// }
+
+
+/**
+   Findings: index i of Graph G returns an edgeRange struct which contains the # of neighbors of the ith node as the first elements and the rest are the indices of the neighbors.
+   How to generate the # of hops to every node in G from the start: BFS
+ */
+
+template<typename indexType>
+std::vector<int> numHopsFromOrigin(Graph<indexType> &G) {
+  std::set<indexType> visited;
+  std::vector<int> distances;
+  for (int i = 0; i < G.size(); i++) distances.push_back(0);
+  std::queue<indexType> q;
+
+
+  q.push(0);
+  while (!q.empty()) {
+    indexType currentNode = q.front();
+    q.pop();
+    visited.insert(currentNode);
+    edgeRange<indexType> neighbors = G[currentNode];
+    for (size_t i = 0; i < neighbors.size(); i++) {
+      indexType neighbor = neighbors[i];
+      if (visited.find(neighbor) == visited.end()) {
+	q.push(neighbor);
+	distances[neighbor] = distances[currentNode] + 1;      
+      }
+    }
+  }
+
+  return distances;
+
+}
+
+
+
 template<typename Point, typename PointRange, typename indexType>
 void timeNeighbors(Graph<indexType> &G,
 		   PointRange &Query_Points, long k,
 		   BuildParams &BP, char* outFile,
 		   groundTruth<indexType> GT, char* res_file, bool graph_built, PointRange &Points)
 {
-
-
     time_loop(1, 0,
       [&] () {},
       [&] () {
         ANN<Point, PointRange, indexType>(G, k, BP, Query_Points, GT, res_file, graph_built, Points);
       },
       [&] () {});
-
     if(outFile != NULL) {
       G.save(outFile);
     }
+    std::vector<int> distances = numHopsFromOrigin<indexType>(G);
+    int maxHops = 0;
+    int indexMaxNode = 0;
+    for (int i = 0; i < distances.size(); i++) {
+      if (distances[i] > maxHops) {
+	maxHops = distances[i];
+	indexMaxNode = i;
+      }
+    }
 
-
+    std::cout <<"Max number of hops: " << maxHops << " at node " << indexMaxNode << std::endl;
+  
+    std::sort(distances.begin(), distances.end());
+    std::cout << "Median number of hops is " << distances[distances.size() / 2] << std::endl; 
 }
 
 int main(int argc, char* argv[]) {
@@ -75,7 +155,7 @@ int main(int argc, char* argv[]) {
         "[-L <bm>] [-k <k> ]  [-gt_path <g>] [-query_path <qF>]"
         "[-graph_path <gF>] [-graph_outfile <oF>] [-res_path <rF>]" "[-num_passes <np>]"
         "[-memory_flag <algoOpt>] [-mst_deg <q>] [-num_clusters <nc>] [-cluster_size <cs>]"
-        "[-data_type <tp>] [-dist_func <df>] [-base_path <b>] <inFile>");
+        "[-data_type <tp>] [-dist_func <df>] [-base_path <b>] [-distance_origin <do>]<inFile>");
 
   char* iFile = P.getOptionValue("-base_path");
   char* oFile = P.getOptionValue("-graph_outfile");
@@ -115,6 +195,7 @@ int main(int argc, char* argv[]) {
   bool self = P.getOption("-self");
   int rerank_factor = P.getOptionIntValue("-rerank_factor", 100);
   bool range = P.getOption("-range");
+  int distance_origin = P.getOptionIntValue("-distance_origin", 0); //distance of all other vectors from the specified vector
 
   // this integer represents the number of random edges to start with for
   // inserting in a single batch per round
@@ -202,7 +283,7 @@ int main(int argc, char* argv[]) {
         using PR = PointRange<Point>;
         PR Points_(Points);
         PR Query_Points_(Query_Points, Points_.params);
-        timeNeighbors<Point, PR, uint>(G, Query_Points_, k, BP, oFile, GT, rFile, graph_built, Points_);
+        timeNeighbors<Point, PR, uint>(G, Query_Points_, k, BP, oFile, GT, rFile, graph_built, Points_); // 
       } else {
         using Point = Mips_Point<float>;
         using PR = PointRange<Point>;

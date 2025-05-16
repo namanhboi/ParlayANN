@@ -1,0 +1,1 @@
+./neighbors -R 40 -cluster_size 100 -num_clusters 10 -alpha 1.2 -delta 0.05 -graph_outfile ../../data/sift/sift_learn_30 -query_path ../../data/sift/sift_query.fbin -gt_path ../../data/sift/sift-100K -res_path ../../data/pynn_res.csv -data_type float -dist_func Euclidian -base_path ../../data/sift/sift_learn.fbin

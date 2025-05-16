@@ -1,0 +1,3 @@
+# ./neighbors -R 30 -L 96 -a 1.0 -graph_outfile ../../data/sift/sift_best_avg_time_30_96_1 -query_path ../../data/sift/sift_query.fbin -gt_path ../../data/sift/sift-100K -data_type float -dist_func Euclidian -base_path ../../data/sift/sift_learn.fbin
+
+./neighbors -R 12 -L 96 -alpha 1.2 -base_path /ssh:ristenpart:/home/nd433/big-ann-benchmarks/data/MSSPACEV1B/spacev1b_base.i8bin.crop_nb_1000000 -query_path /ssh:ristenpart:/home/nd433/big-ann-benchmarks/data/MSSPACEV1B/query.i8bin -gt_path /ssh:ristenpart:/home/nd433/big-ann-benchmarks/data/MSSPACEV1B/msspacev-gt-1M -graph_outfile ../data/msspacev/graph

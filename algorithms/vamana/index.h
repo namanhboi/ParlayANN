@@ -243,6 +243,7 @@ struct knn_index {
       // search for each node starting from the start_point, then call
       // robustPrune with the visited list as its candidate set
       t_beam.start();
+      std::cout <<"floor is" << floor << ", ceiling is" << ceiling << std::endl;
 
       parlay::parallel_for(floor, ceiling, [&](size_t i) {
         size_t index = shuffled_inserts[i];
@@ -263,8 +264,8 @@ struct knn_index {
         long rp_distance_comps;
         std::tie(new_out_[i-floor], rp_distance_comps) = robustPrune(index, visited, G, Points, alpha);
         BuildStats.increment_dist(index, rp_distance_comps);
-      });
-
+      }, 100);
+      std::cout << "Finished beamsearch" << std::endl;
       parlay::parallel_for(floor, ceiling, [&](size_t i) {
         G[shuffled_inserts[i]].update_neighbors(new_out_[i-floor]);
       });
