@@ -21,6 +21,8 @@
 #include "utils/euclidian_point.h"
 #include "utils/beamSearch.h"
 #include "utils/stats.h"
+#include "utils/parse_results.h"
+#include "utils/check_nn_recall.h"
 using namespace parlayANN;
 
 // ./vbase_graph -base_path ../data/sift/sift_learn.fbin -graph_path ../data/sift/sift_learn_32_64 -data_type float -dist_func Euclidian
@@ -133,10 +135,11 @@ int main(int argc, char* argv[]) {
   char* gFile = P.getOptionValue("-graph_path"); // path to already generated graph
   char* qFile = P.getOptionValue("-query_path");
   char* resFile = P.getOptionValue("-res_path");
+  char* gtFile = P.getOptionValue("-gt_path");
   std::string outputFile = P.getOptionValue("-output_path", "data.csv");
   std::filesystem::path output_path {outputFile};
   if (std::filesystem::exists(output_path)) std::filesystem::remove(output_path);
-  
+
   std::string vectype = P.getOptionValue("-data_type");
   std::string dist_func = P.getOptionValue("-dist_func");
   bool normalize = P.getOption("-normalize");
@@ -148,10 +151,11 @@ int main(int argc, char* argv[]) {
   long degree_limit = P.getOptionLongValue("-dergee_limit", -1);
   int k = P.getOptionIntValue("-k", 10);
   int beam_size = P.getOptionIntValue("-beam_size", 10);
-  double cut = P.getOptionDoubleValue("-cut", 1.35);
+  double cut = P.getOptionDoubleValue("-cut", 1.0);
 
   bool frontier_history = P.getOption("-frontier_history");
-  
+
+
   std::random_device rd;
   std::mt19937 gen(rd()); // seed
   std::mt19937 gen_seed(seed);
@@ -159,7 +163,6 @@ int main(int argc, char* argv[]) {
   if (vectype == "float") {
     if (dist_func == "Euclidian"){
       if (normalize) abort_with_message("will impl normalization later");
-
 
 
       if (quantize == 8 || quantize == 16) abort_with_message( "Will impl support for quantize later");
@@ -181,9 +184,17 @@ int main(int argc, char* argv[]) {
       QP.k = k;
       QP.cut = cut ;
       QP.beamSize = beam_size;
-
-      Graph_ G_(name, params, G.size(), avg_deg, max_deg, idx_time);
-
+      if (resFile != nullptr) {
+	groundTruth<unsigned int> GT (gtFile);
+	std::string graph_name = P.getOptionValue("-frontier_history", "Graph");
+	std::string params = "params";
+	auto [avg_deg, max_deg] = graph_stats_(G);
+	double idx_time = 0.0;
+	Graph_ G_(graph_name, params, G.size(), avg_deg, max_deg, idx_time);
+	
+	search_and_parse(G_, G, Points, QueryPoints, GT, resFile, k, true);
+	
+      }
 
 
       if (!frontier_history) {

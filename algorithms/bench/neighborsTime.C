@@ -89,32 +89,32 @@ using uint = unsigned int;
    How to generate the # of hops to every node in G from the start: BFS
  */
 
-template<typename indexType>
-std::vector<int> numHopsFromOrigin(Graph<indexType> &G) {
-  std::set<indexType> visited;
-  std::vector<int> distances;
-  for (int i = 0; i < G.size(); i++) distances.push_back(0);
-  std::queue<indexType> q;
+// template<typename indexType>
+// std::vector<int> numHopsFromOrigin(Graph<indexType> &G) {
+//   std::set<indexType> visited;
+//   std::vector<int> distances;
+//   for (int i = 0; i < G.size(); i++) distances.push_back(0);
+//   std::queue<indexType> q;
 
 
-  q.push(0);
-  while (!q.empty()) {
-    indexType currentNode = q.front();
-    q.pop();
-    visited.insert(currentNode);
-    edgeRange<indexType> neighbors = G[currentNode];
-    for (size_t i = 0; i < neighbors.size(); i++) {
-      indexType neighbor = neighbors[i];
-      if (visited.find(neighbor) == visited.end()) {
-	q.push(neighbor);
-	distances[neighbor] = distances[currentNode] + 1;      
-      }
-    }
-  }
+//   q.push(0);
+//   while (!q.empty()) {
+//     indexType currentNode = q.front();
+//     q.pop();
+//     visited.insert(currentNode);
+//     edgeRange<indexType> neighbors = G[currentNode];
+//     for (size_t i = 0; i < neighbors.size(); i++) {
+//       indexType neighbor = neighbors[i];
+//       if (visited.find(neighbor) == visited.end()) {
+// 	q.push(neighbor);
+// 	distances[neighbor] = distances[currentNode] + 1;      
+//       }
+//     }
+//   }
 
-  return distances;
+//   return distances;
 
-}
+// }
 
 
 
@@ -133,20 +133,20 @@ void timeNeighbors(Graph<indexType> &G,
     if(outFile != NULL) {
       G.save(outFile);
     }
-    std::vector<int> distances = numHopsFromOrigin<indexType>(G);
-    int maxHops = 0;
-    int indexMaxNode = 0;
-    for (int i = 0; i < distances.size(); i++) {
-      if (distances[i] > maxHops) {
-	maxHops = distances[i];
-	indexMaxNode = i;
-      }
-    }
+    // std::vector<int> distances = numHopsFromOrigin<indexType>(G);
+    // int maxHops = 0;
+    // int indexMaxNode = 0;
+    // for (int i = 0; i < distances.size(); i++) {
+      // if (distances[i] > maxHops) {
+	// maxHops = distances[i];
+	// indexMaxNode = i;
+      // }
+    // }
 
-    std::cout <<"Max number of hops: " << maxHops << " at node " << indexMaxNode << std::endl;
+    // std::cout <<"Max number of hops: " << maxHops << " at node " << indexMaxNode << std::endl;
   
-    std::sort(distances.begin(), distances.end());
-    std::cout << "Median number of hops is " << distances[distances.size() / 2] << std::endl; 
+    // std::sort(distances.begin(), distances.end());
+    // std::cout << "Median number of hops is " << distances[distances.size() / 2] << std::endl; 
 }
 
 int main(int argc, char* argv[]) {

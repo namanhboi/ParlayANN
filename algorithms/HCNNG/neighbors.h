@@ -52,7 +52,7 @@ void ANN(Graph<indexType> &G, long k, BuildParams &BP,
     idx_time = t.next_time();
   } else{idx_time=0;}
   std::string name = "HCNNG";
-  std::string params = "Trees = " + std::to_string(BP.num_clusters);
+  std::string params = "Tree/num_clusters = " + std::to_string(BP.num_clusters) + ", cluster_size = " + std::to_string(BP.cluster_size) + ", MST_deg = " + std::to_string(BP.MST_deg);
   auto [avg_deg, max_deg] = graph_stats_(G);
   Graph_ G_(name, params, G.size(), avg_deg, max_deg, idx_time);
   G_.print();

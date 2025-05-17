@@ -64,7 +64,10 @@ void ANN_Quantized(Graph<indexType> &G, long k, BuildParams &BP,
 
   std::string name = "Vamana";
   std::string params =
-    "R = " + std::to_string(BP.R) + ", L = " + std::to_string(BP.L);
+    "R = " + std::to_string(BP.R) +
+    ", L = " + std::to_string(BP.L) +
+    ", alpha = " + std::to_string(BP.alpha) +
+    ", num_passes = " + std::to_string(BP.num_passes);
   auto [avg_deg, max_deg] = graph_stats_(G);
   auto vv = BuildStats.visited_stats();
   std::cout << "Average visited: " << vv[0] << ", Tail visited: " << vv[1]

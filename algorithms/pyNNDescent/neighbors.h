@@ -51,7 +51,7 @@ void ANN(Graph<indexType> &G, long k, BuildParams &BP,
     }else {idx_time=0;}
 
     std::string name = "pyNNDescent";
-    std::string params = "K = " + std::to_string(K);
+    std::string params = "R = " + std::to_string(K) + ", alpha = " + std::to_string(BP.alpha) + ", num_clusters  = " + std::to_string(BP.num_clusters) + ", cluster_size = " + std::to_string(BP.cluster_size) + ", delta = " + std::to_string(BP.delta);
     auto [avg_deg, max_deg] = graph_stats_(G);
     Graph_ G_(name, params, G.size(), avg_deg, max_deg, idx_time);
     G_.print();
